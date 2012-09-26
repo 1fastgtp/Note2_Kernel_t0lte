@@ -544,10 +544,15 @@ static const struct usb_device_id smsusb_id_table[] = {
 	{ USB_DEVICE(0x2040, 0xc0a0),
 		.driver_info = SMS1XXX_BOARD_HAUPPAUGE_WINDHAM },
 <<<<<<< HEAD
+<<<<<<< HEAD
 	{ USB_DEVICE(0x2040, 0xf5a0),
 		.driver_info = SMS1XXX_BOARD_HAUPPAUGE_WINDHAM },
 =======
 >>>>>>> 57a0164... Linux 3.0.33
+=======
+	{ USB_DEVICE(0x2040, 0xf5a0),
+		.driver_info = SMS1XXX_BOARD_HAUPPAUGE_WINDHAM },
+>>>>>>> b227c56... 3.0.37
 	{ } /* Terminating entry */
 	};
 
