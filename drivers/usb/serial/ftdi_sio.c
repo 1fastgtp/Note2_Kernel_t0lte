@@ -814,6 +814,7 @@ static struct usb_device_id id_table_combined [] = {
 		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },
 	{ USB_DEVICE(LARSENBRUSGAARD_VID, LB_ALTITRACK_PID) },
 	{ USB_DEVICE(GN_OTOMETRICS_VID, AURICAL_USB_PID) },
+<<<<<<< HEAD
 	{ USB_DEVICE(FTDI_VID, PI_C865_PID) },
 	{ USB_DEVICE(FTDI_VID, PI_C857_PID) },
 	{ USB_DEVICE(PI_VID, PI_C866_PID) },
@@ -833,6 +834,9 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(PI_VID, PI_1015_PID) },
 	{ USB_DEVICE(PI_VID, PI_1016_PID) },
 	{ USB_DEVICE(KONDO_VID, KONDO_USB_SERIAL_PID) },
+=======
+	{ USB_DEVICE(PI_VID, PI_E861_PID) },
+>>>>>>> 57a0164... Linux 3.0.33
 	{ USB_DEVICE(BAYER_VID, BAYER_CONTOUR_CABLE_PID) },
 	{ USB_DEVICE(FTDI_VID, MARVELL_OPENRD_PID),
 		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },

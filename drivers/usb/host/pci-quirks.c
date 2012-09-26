@@ -721,7 +721,10 @@ static int handshake(void __iomem *ptr, u32 mask, u32 done,
 }
 
 #define PCI_DEVICE_ID_INTEL_LYNX_POINT_XHCI	0x8C31
+<<<<<<< HEAD
 #define PCI_DEVICE_ID_INTEL_LYNX_POINT_LP_XHCI	0x9C31
+=======
+>>>>>>> 57a0164... Linux 3.0.33
 
 bool usb_is_intel_ppt_switchable_xhci(struct pci_dev *pdev)
 {
@@ -735,8 +738,12 @@ bool usb_is_intel_lpt_switchable_xhci(struct pci_dev *pdev)
 {
 	return pdev->class == PCI_CLASS_SERIAL_USB_XHCI &&
 		pdev->vendor == PCI_VENDOR_ID_INTEL &&
+<<<<<<< HEAD
 		(pdev->device == PCI_DEVICE_ID_INTEL_LYNX_POINT_XHCI ||
 		 pdev->device == PCI_DEVICE_ID_INTEL_LYNX_POINT_LP_XHCI);
+=======
+		pdev->device == PCI_DEVICE_ID_INTEL_LYNX_POINT_XHCI;
+>>>>>>> 57a0164... Linux 3.0.33
 }
 
 bool usb_is_intel_switchable_xhci(struct pci_dev *pdev)
