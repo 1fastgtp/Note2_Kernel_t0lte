@@ -836,7 +836,11 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(KONDO_VID, KONDO_USB_SERIAL_PID) },
 =======
 	{ USB_DEVICE(PI_VID, PI_E861_PID) },
+<<<<<<< HEAD
 >>>>>>> 57a0164... Linux 3.0.33
+=======
+	{ USB_DEVICE(KONDO_VID, KONDO_USB_SERIAL_PID) },
+>>>>>>> 3b9fc5e... 3.0.42
 	{ USB_DEVICE(BAYER_VID, BAYER_CONTOUR_CABLE_PID) },
 	{ USB_DEVICE(FTDI_VID, MARVELL_OPENRD_PID),
 		.driver_info = (kernel_ulong_t)&ftdi_jtag_quirk },

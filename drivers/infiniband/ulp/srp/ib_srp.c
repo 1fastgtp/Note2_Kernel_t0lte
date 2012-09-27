@@ -620,9 +620,15 @@ static void srp_reset_req(struct srp_target_port *target, struct srp_request *re
 	struct scsi_cmnd *scmnd = srp_claim_req(target, req, NULL);
 
 	if (scmnd) {
+<<<<<<< HEAD
 		srp_free_req(target, req, scmnd, 0);
 		scmnd->result = DID_RESET << 16;
 		scmnd->scsi_done(scmnd);
+=======
+		scmnd->result = DID_RESET << 16;
+		scmnd->scsi_done(scmnd);
+		srp_free_req(target, req, scmnd, 0);
+>>>>>>> 3b9fc5e... 3.0.42
 	}
 }
 
@@ -1669,7 +1675,10 @@ static int srp_abort(struct scsi_cmnd *scmnd)
 			  SRP_TSK_ABORT_TASK);
 	srp_free_req(target, req, scmnd, 0);
 	scmnd->result = DID_ABORT << 16;
+<<<<<<< HEAD
 	scmnd->scsi_done(scmnd);
+=======
+>>>>>>> 3b9fc5e... 3.0.42
 
 	return SUCCESS;
 }
