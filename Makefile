@@ -1,6 +1,6 @@
 VERSION = 3
 PATCHLEVEL = 0
-SUBLEVEL = 38
+SUBLEVEL = 39
 EXTRAVERSION = Xone_Kernel
 NAME = Sneaky Weasel
 

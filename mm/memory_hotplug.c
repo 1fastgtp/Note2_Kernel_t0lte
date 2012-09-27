@@ -814,7 +814,15 @@ do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
 		}
 		/* this function returns # of failed pages */
 		ret = migrate_pages(&source, hotremove_migrate_alloc, 0,
+<<<<<<< HEAD
 								true, true);
+=======
+								true, MIGRATE_SYNC);
+#else
+		ret = migrate_pages(&source, hotremove_migrate_alloc, 0,
+								true, MIGRATE_SYNC, 0);
+#endif
+>>>>>>> 1836e59... 3.0.39
 		if (ret)
 			putback_lru_pages(&source);
 	}
