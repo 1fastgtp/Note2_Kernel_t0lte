@@ -1334,8 +1334,8 @@ static int soft_offline_huge_page(struct page *page, int flags)
 	/* Keep page count to indicate a given hugepage is isolated. */
 
 	list_add(&hpage->lru, &pagelist);
-	ret = migrate_huge_pages(&pagelist, new_page, MPOL_MF_MOVE_ALL, 0,
-				true);
+	ret = migrate_huge_pages(&pagelist, new_page, MPOL_MF_MOVE_ALL, false,
+				MIGRATE_SYNC);
 	if (ret) {
 		struct page *page1, *page2;
 		list_for_each_entry_safe(page1, page2, &pagelist, lru)
@@ -1465,12 +1465,16 @@ int soft_offline_page(struct page *page, int flags)
 		list_add(&page->lru, &pagelist);
 		ret = migrate_pages(&pagelist, new_page, MPOL_MF_MOVE_ALL,
 <<<<<<< HEAD
+<<<<<<< HEAD
 								0, true);
 =======
 								0, MIGRATE_SYNC);
+=======
+								false, MIGRATE_SYNC);
+>>>>>>> d519968... 3.0.41
 #else
 		ret = migrate_pages(&pagelist, new_page, MPOL_MF_MOVE_ALL,
-								0, MIGRATE_SYNC, 0);
+								false, MIGRATE_SYNC, 0);
 #endif
 >>>>>>> 1836e59... 3.0.39
 		if (ret) {
