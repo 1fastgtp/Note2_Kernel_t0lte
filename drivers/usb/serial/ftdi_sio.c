@@ -815,6 +815,9 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(LARSENBRUSGAARD_VID, LB_ALTITRACK_PID) },
 	{ USB_DEVICE(GN_OTOMETRICS_VID, AURICAL_USB_PID) },
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ce11a2e... Linux 3.0.44
 	{ USB_DEVICE(FTDI_VID, PI_C865_PID) },
 	{ USB_DEVICE(FTDI_VID, PI_C857_PID) },
 	{ USB_DEVICE(PI_VID, PI_C866_PID) },
@@ -822,6 +825,7 @@ static struct usb_device_id id_table_combined [] = {
 	{ USB_DEVICE(PI_VID, PI_C725_PID) },
 	{ USB_DEVICE(PI_VID, PI_E517_PID) },
 	{ USB_DEVICE(PI_VID, PI_C863_PID) },
+<<<<<<< HEAD
 	{ USB_DEVICE(PI_VID, PI_E861_PID) },
 	{ USB_DEVICE(PI_VID, PI_C867_PID) },
 	{ USB_DEVICE(PI_VID, PI_E609_PID) },
@@ -839,6 +843,19 @@ static struct usb_device_id id_table_combined [] = {
 <<<<<<< HEAD
 >>>>>>> 57a0164... Linux 3.0.33
 =======
+=======
+	{ USB_DEVICE(PI_VID, PI_E861_PID) },
+	{ USB_DEVICE(PI_VID, PI_C867_PID) },
+	{ USB_DEVICE(PI_VID, PI_E609_PID) },
+	{ USB_DEVICE(PI_VID, PI_E709_PID) },
+	{ USB_DEVICE(PI_VID, PI_100F_PID) },
+	{ USB_DEVICE(PI_VID, PI_1011_PID) },
+	{ USB_DEVICE(PI_VID, PI_1012_PID) },
+	{ USB_DEVICE(PI_VID, PI_1013_PID) },
+	{ USB_DEVICE(PI_VID, PI_1014_PID) },
+	{ USB_DEVICE(PI_VID, PI_1015_PID) },
+	{ USB_DEVICE(PI_VID, PI_1016_PID) },
+>>>>>>> ce11a2e... Linux 3.0.44
 	{ USB_DEVICE(KONDO_VID, KONDO_USB_SERIAL_PID) },
 >>>>>>> 3b9fc5e... 3.0.42
 	{ USB_DEVICE(BAYER_VID, BAYER_CONTOUR_CABLE_PID) },
