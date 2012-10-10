@@ -989,6 +989,7 @@ void scsi_remove_target(struct device *dev)
 {
 	struct Scsi_Host *shost = dev_to_shost(dev->parent);
 <<<<<<< HEAD
+<<<<<<< HEAD
 	struct scsi_target *starget, *last = NULL;
 	unsigned long flags;
 
@@ -1002,12 +1003,23 @@ void scsi_remove_target(struct device *dev)
  restart:
 	found = NULL;
 >>>>>>> bddfae8... 3.0.40
+=======
+	struct scsi_target *starget, *last = NULL;
+	unsigned long flags;
+
+	/* remove targets being careful to lookup next entry before
+	 * deleting the last
+	 */
+>>>>>>> 000ba25... Linux 3.0.45
 	spin_lock_irqsave(shost->host_lock, flags);
 	list_for_each_entry(starget, &shost->__targets, siblings) {
 		if (starget->state == STARGET_DEL)
 			continue;
 		if (starget->dev.parent == dev || &starget->dev == dev) {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 000ba25... Linux 3.0.45
 			/* assuming new targets arrive at the end */
 			starget->reap_ref++;
 			spin_unlock_irqrestore(shost->host_lock, flags);
@@ -1016,15 +1028,19 @@ void scsi_remove_target(struct device *dev)
 			last = starget;
 			__scsi_remove_target(starget);
 			spin_lock_irqsave(shost->host_lock, flags);
+<<<<<<< HEAD
 =======
 			found = starget;
 			found->reap_ref++;
 			break;
 >>>>>>> bddfae8... 3.0.40
+=======
+>>>>>>> 000ba25... Linux 3.0.45
 		}
 	}
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 	if (last)
 		scsi_target_reap(last);
@@ -1040,6 +1056,10 @@ void scsi_remove_target(struct device *dev)
 		goto restart;
 	}
 >>>>>>> bddfae8... 3.0.40
+=======
+	if (last)
+		scsi_target_reap(last);
+>>>>>>> 000ba25... Linux 3.0.45
 }
 EXPORT_SYMBOL(scsi_remove_target);
 
