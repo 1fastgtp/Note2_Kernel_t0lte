@@ -17,7 +17,6 @@
 #include <linux/fs.h>
 #include <linux/irq.h>
 #include <linux/poll.h>
-#include <linux/mfd/pm8xxx/gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/ioctl.h>
 #include <linux/module.h>
@@ -26,7 +25,8 @@
 #include <linux/netlink.h>
 #include <linux/skbuff.h>
 
-
+#include <mach/gpio-exynos4.h>
+#include <plat/gpio-cfg.h>
 
 
 
@@ -91,7 +91,7 @@ static void __exit felica_exit(void);
 #define FELICA_NL_REQ_SYNC				0x06
 #define FELICA_NL_RESPONCE				0xFE
 #define FELICA_NL_CONNECT_MSG			0xFF
-#define FELICA_NL_MSG_DATA_SIZE			4096
+#define FELICA_NL_MSG_DATA_SIZE			4096*4
 #define FELICA_NL_MSG_SIZE			(FELICA_NL_MSG_DATA_SIZE+4)
 
 #define MSG_READ1_FLAGS_OFFSET			1
@@ -102,9 +102,7 @@ static void __exit felica_exit(void);
 #define MSG_WRITE_LEN_OFFSET			6
 #define MSG_LOCK_ADDR_OFFSET			7
 #define MSG_I2C_ADDR_OFFSET			8
-#ifdef CONFIG_FELICA_DIAG
 #define MSG_DIAG_NAME_OFFSET			9
-#endif
 #define MSG_MFC_UID_FRONT_OFFSET		24
 #define MSG_MFC_UID_BACK_OFFSET			25
 #define MSG_MFL_UID_FRONT_OFFSET		26
@@ -134,10 +132,14 @@ static long felica_uart_ioctl(struct file *file, unsigned int cmd,\
 			unsigned long arg);
 static void felica_nl_init(void);
 static void felica_nl_exit(void);
-static void felica_nl_send_msg(int len);
+static int  felica_nl_send_msg(int len);
 static void felica_nl_recv_msg(struct sk_buff *skb);
 static void felica_nl_wait_ret_msg(void);
 static void felica_set_felica_info(void);
+
+static int felica_smc_read_oemflag(u32 ctrl_word, u32 *val);
+static int felica_Cpu0(void);
+static int felica_CpuAll(void);
 static uint8_t felica_get_tamper_fuse_cmd(void);
 
 
@@ -149,7 +151,7 @@ static uint8_t felica_get_tamper_fuse_cmd(void);
 
 /* constant definition */
 #define FELICA_PON_NAME					"felica_pon"
-#define GPIO_PINID_FELICA_PON			93
+#define GPIO_PINID_FELICA_PON			EXYNOS4_GPL2(7)
 #define FELICA_PON_DATA_LEN				1
 #define FELICA_PON_WIRELESS				0
 #define FELICA_PON_WIRED				1
@@ -215,7 +217,7 @@ static ssize_t felica_cen_write(struct file *file, const char __user *data,\
 
 /* constant definition */
 #define FELICA_RFS_NAME					"felica_rfs"
-#define GPIO_PINID_FELICA_RFS			92
+#define GPIO_PINID_FELICA_RFS			EXYNOS4_GPL2(6)
 #define FELICA_RFS_DATA_LEN				1
 #define FELICA_RFS_STANDBY				0
 #define FELICA_RFS_DETECTED				1
@@ -263,7 +265,7 @@ static ssize_t felica_rws_write(struct file *file, const char __user *data, \
 
 /* constant definition */
 #define FELICA_INT_POLL_NAME			"felica_int_poll"
-#define GPIO_PINID_FELICA_INT			106
+#define GPIO_PINID_FELICA_INT			EXYNOS4_GPX1(7)
 #define FELICA_INT_DATA_LEN				1
 #define FELICA_INT_DELAY_TIME			3
 #define FELICA_INT_LOW					0
@@ -281,7 +283,6 @@ static ssize_t felica_int_poll_read(struct file *file, \
 static unsigned int felica_int_poll_poll(struct file *file, poll_table *wait);
 
 
-#ifdef CONFIG_FELICA_DIAG
 /******************************************************************************
  * /dev/felica_uid
  ******************************************************************************/
@@ -299,7 +300,6 @@ static int felica_uid_open(struct inode *inode, struct file *file);
 static int felica_uid_close(struct inode *inode, struct file *file);
 static long felica_uid_ioctl(struct file *file, unsigned int cmd, \
 						unsigned long arg);
-#endif
 /******************************************************************************
  * /dev/felica_ant
  ******************************************************************************/
@@ -317,9 +317,5 @@ static ssize_t felica_ant_read(struct file *file, char __user *buf,\
 				size_t len, loff_t *ppos);
 static ssize_t felica_ant_write(struct file *file, const char __user *data,\
 				size_t len, loff_t *ppos);
-
-
-
-
 
 #endif /* _FELICA_H */

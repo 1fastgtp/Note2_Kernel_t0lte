@@ -15,7 +15,7 @@
 #include <linux/module.h>
 #include <linux/mempool.h>
 #include <linux/mutex.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include "diagchar.h"
 
 void *diagmem_alloc(struct diagchar_dev *driver, int size, int pool_type)

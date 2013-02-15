@@ -23,17 +23,6 @@
 
 #include <linux/mpu_411.h>
 
-struct mpu6050_config {
-	unsigned int odr;		/**< output data rate 1/1000 Hz */
-	unsigned int fsr;		/**< full scale range mg */
-	unsigned int ths;		/**< mot/no-mot thseshold mg */
-	unsigned int dur;		/**< mot/no-mot duration ms */
-	unsigned int irq_type;		/**< irq type */
-};
-
 struct ext_slave_descr *mpu6050_get_slave_descr(void);
-extern int mpu6050_set_odr(void *mlsl_handle,
-			  struct ext_slave_platform_data *pdata,
-			  struct mpu6050_config *config, long apply, long odr);
 
 #endif

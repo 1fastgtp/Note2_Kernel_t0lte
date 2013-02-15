@@ -28,10 +28,7 @@
 #include "logger.h"
 
 #include <asm/ioctls.h>
-#ifdef CONFIG_SEC_DEBUG
 #include <mach/sec_debug.h>
-static char klog_buf[256];
-#endif
 
 /*
  * struct logger_log - represents a specific log, such as 'main' or 'radio'
@@ -409,16 +406,19 @@ static ssize_t do_write_log_from_user(struct logger_log *log,
 		if (copy_from_user(log->buffer, buf + len, count - len))
 			return -EFAULT;
 
-#ifdef CONFIG_SEC_DEBUG
-	memset(klog_buf, 0, 255);
-	if (strncmp(log->buffer + log->w_off, "!@", 2) == 0) {
-		if (count < 255)
-			memcpy(klog_buf, log->buffer + log->w_off, count);
-		else
-			memcpy(klog_buf, log->buffer + log->w_off, 255);
-		klog_buf[255] = 0;
+	/* print as kernel log if the log string starts with "!@" */
+	if (count >= 2) {
+		if (log->buffer[log->w_off] == '!'
+		    && log->buffer[logger_offset(log->w_off + 1)] == '@') {
+			char tmp[256];
+			int i;
+			for (i = 0; i < min(count, sizeof(tmp) - 1); i++)
+				tmp[i] =
+				    log->buffer[logger_offset(log->w_off + i)];
+			tmp[i] = '\0';
+			printk("%s\n", tmp);
+		}
 	}
-#endif
 
 	log->w_off = logger_offset(log->w_off + count);
 
@@ -489,11 +489,6 @@ ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	/* wake up any blocked readers */
 	wake_up_interruptible(&log->wq);
 
-#ifdef CONFIG_SEC_DEBUG
-	if (strncmp(klog_buf, "!@", 2) == 0)
-		printk(KERN_INFO "%s\n", klog_buf);
-#endif
-
 	return ret;
 }
 
@@ -548,15 +543,19 @@ static int logger_open(struct inode *inode, struct file *file)
  *
  * Note this is a total no-op in the write-only case. Keep it that way!
  */
-static int logger_release(struct inode *ignored, struct file *file)
+static int logger_release(struct inode *inode, struct file *file)
 {
 	if (file->f_mode & FMODE_READ) {
 		struct logger_reader *reader = file->private_data;
-		struct logger_log *log = reader->log;
+		struct logger_log *log;
+		unsigned long start = jiffies;
+		log = get_log_from_minor(MINOR(inode->i_rdev));
 		mutex_lock(&log->mutex);
 		list_del(&reader->list);
 		mutex_unlock(&log->mutex);
 		kfree(reader);
+		pr_info("%s: took %d msec\n", __func__,
+			jiffies_to_msecs(jiffies - start));
 	}
 
 	return 0;
@@ -718,10 +717,15 @@ static struct logger_log VAR = { \
 	.size = SIZE, \
 };
 
-DEFINE_LOGGER_DEVICE(log_main, LOGGER_LOG_MAIN, 512*1024)
+DEFINE_LOGGER_DEVICE(log_main, LOGGER_LOG_MAIN, 2048*1024)
 DEFINE_LOGGER_DEVICE(log_events, LOGGER_LOG_EVENTS, 256*1024)
+#if defined(CONFIG_MACH_T0)
 DEFINE_LOGGER_DEVICE(log_radio, LOGGER_LOG_RADIO, 2048*1024)
+#else
+DEFINE_LOGGER_DEVICE(log_radio, LOGGER_LOG_RADIO, 1024*1024)
+#endif
 DEFINE_LOGGER_DEVICE(log_system, LOGGER_LOG_SYSTEM, 256*1024)
+DEFINE_LOGGER_DEVICE(log_sf, LOGGER_LOG_SF, 256*1024)
 
 static struct logger_log *get_log_from_minor(int minor)
 {
@@ -733,6 +737,8 @@ static struct logger_log *get_log_from_minor(int minor)
 		return &log_radio;
 	if (log_system.misc.minor == minor)
 		return &log_system;
+	if (log_sf.misc.minor == minor)
+		return &log_sf;
 	return NULL;
 }
 
@@ -753,42 +759,6 @@ static int __init init_log(struct logger_log *log)
 	return 0;
 }
 
-#ifdef CONFIG_SEC_DEBUG
-int sec_debug_subsys_set_logger_info(
-	struct sec_debug_subsys_logger_log_info *log_info)
-{
-	/*
-	struct secdbg_logger_log_info log_info = {
-		.stinfo = {
-			.buffer_offset = offsetof(struct logger_log, buffer),
-			.w_off_offset = offsetof(struct logger_log, w_off),
-			.head_offset = offsetof(struct logger_log, head),
-			.size_offset = offsetof(struct logger_log, size),
-			.size_t_typesize = sizeof(size_t),
-		},
-	};
-	*/
-	log_info->stinfo.buffer_offset = offsetof(struct logger_log, buffer);
-	log_info->stinfo.w_off_offset = offsetof(struct logger_log, w_off);
-	log_info->stinfo.head_offset = offsetof(struct logger_log, head);
-	log_info->stinfo.size_offset = offsetof(struct logger_log, size);
-	log_info->stinfo.size_t_typesize = sizeof(size_t);
-
-	log_info->main.log_paddr = __pa(&log_main);
-	log_info->main.buffer_paddr = __pa(_buf_log_main);
-
-	log_info->system.log_paddr = __pa(&log_system);
-	log_info->system.buffer_paddr = __pa(_buf_log_system);
-
-	log_info->events.log_paddr = __pa(&log_events);
-	log_info->events.buffer_paddr = __pa(_buf_log_events);
-
-	log_info->radio.log_paddr = __pa(&log_radio);
-	log_info->radio.buffer_paddr = __pa(_buf_log_radio);
-
-	return 0;
-}
-#endif
 static int __init logger_init(void)
 {
 	int ret;
@@ -809,10 +779,12 @@ static int __init logger_init(void)
 	if (unlikely(ret))
 		goto out;
 
-#ifdef CONFIG_SEC_DEBUG
+	ret = init_log(&log_sf);
+	if (unlikely(ret))
+		goto out;
+
 	sec_getlog_supply_loggerinfo(_buf_log_main, _buf_log_radio,
 				     _buf_log_events, _buf_log_system);
-#endif
 out:
 	return ret;
 }

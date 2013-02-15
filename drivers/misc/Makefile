@@ -1,4 +1,4 @@
-#
+
 # Makefile for misc devices that really don't fit anywhere else.
 #
 
@@ -13,13 +13,13 @@ obj-$(CONFIG_ATMEL_TCLIB)	+= atmel_tclib.o
 obj-$(CONFIG_BMP085)		+= bmp085.o
 obj-$(CONFIG_ICS932S401)	+= ics932s401.o
 obj-$(CONFIG_LKDTM)		+= lkdtm.o
-obj-$(CONFIG_TIFM_CORE)       	+= tifm_core.o
-obj-$(CONFIG_TIFM_7XX1)       	+= tifm_7xx1.o
+obj-$(CONFIG_TIFM_CORE)		+= tifm_core.o
+obj-$(CONFIG_TIFM_7XX1)		+= tifm_7xx1.o
 obj-$(CONFIG_PHANTOM)		+= phantom.o
 obj-$(CONFIG_SENSORS_BH1780)	+= bh1780gli.o
 obj-$(CONFIG_SENSORS_BH1770)	+= bh1770glc.o
 obj-$(CONFIG_SENSORS_APDS990X)	+= apds990x.o
-obj-$(CONFIG_ANDROID_PMEM)      += pmem.o
+obj-$(CONFIG_ANDROID_PMEM)	+= pmem.o
 obj-$(CONFIG_SGI_IOC4)		+= ioc4.o
 obj-$(CONFIG_ENCLOSURE_SERVICES) += enclosure.o
 obj-$(CONFIG_KGDB_TESTS)	+= kgdbts.o
@@ -40,6 +40,8 @@ obj-$(CONFIG_IWMC3200TOP)      += iwmc3200top/
 obj-$(CONFIG_HMC6352)		+= hmc6352.o
 obj-y				+= eeprom/
 obj-y				+= cb710/
+obj-$(CONFIG_MPU_SENSORS_MPU3050) += mpu3050/
+obj-$(CONFIG_MPU_SENSORS_MPU6050) += inv_mpu/
 obj-$(CONFIG_SPEAR13XX_PCIE_GADGET)	+= spear13xx_pcie_gadget.o
 obj-$(CONFIG_VMWARE_BALLOON)	+= vmw_balloon.o
 obj-$(CONFIG_ARM_CHARLCD)	+= arm-charlcd.o
@@ -51,34 +53,35 @@ obj-y				+= carma/
 obj-$(CONFIG_WL127X_RFKILL)	+= wl127x-rfkill.o
 obj-$(CONFIG_APANIC)		+= apanic.o
 obj-$(CONFIG_SENSORS_AK8975)	+= akm8975.o
-obj-$(CONFIG_TSIF) += msm_tsif.o
-msm_tsif-objs := tsif.o
-obj-$(CONFIG_TSIF_CHRDEV) += tsif_chrdev.o
-obj-$(CONFIG_TSPP) += tspp.o
-obj-$(CONFIG_HAPTIC_ISA1200)		+= isa1200.o
-obj-$(CONFIG_PMIC8058_PWM) += pmic8058-pwm.o
-obj-$(CONFIG_PMIC8XXX_VIBRATOR) += pm8xxx-vibrator.o
-obj-$(CONFIG_PMIC8XXX_NFC) += pm8xxx-nfc.o
-obj-$(CONFIG_PMIC8XXX_UPL) += pm8xxx-upl.o
-obj-$(CONFIG_MSM_MEMORY_LOW_POWER_MODE_SUSPEND_DEEP_POWER_DOWN) \
-				+= msm_migrate_pages.o
-obj-$(CONFIG_PMIC8058_XOADC)	+= pmic8058-xoadc.o
+obj-$(CONFIG_SAMSUNG_C2C)	+= c2c/
+obj-$(CONFIG_USBHUB_USB3503)	+= usb3503.o
+obj-$(CONFIG_USBHUB_USB3503_OTG_CONN)	+= usb3503_otg_conn.o
+obj-$(CONFIG_USBHUB_USB3803)	+= usb3803.o
+ifeq ($(CONFIG_SEC_MODEM_P8LTE),y)
+obj-$(CONFIG_SEC_MODEM)         += modem_if_na/
+else
+obj-$(CONFIG_SEC_MODEM)		+= modem_if/
+endif
 obj-$(CONFIG_MFD_MAX77693)	+= max77693-muic.o
-obj-$(CONFIG_QSEECOM)		+= tzcom.o
-obj-$(CONFIG_QSEECOM) += qseecom.o
-obj-$(CONFIG_QFP_FUSE)		+= qfp_fuse.o
-obj-$(CONFIG_NFC_PN544)		+= pn544.o
-obj-$(CONFIG_USB_SWITCH_FSA9485)	+= fsa9485.o
-obj-$(CONFIG_SEC_MISC)		+= sec_param.o sec_misc.o
-obj-$(CONFIG_MPU_411_ENABLE)	+= inv_mpu/
-obj-$(CONFIG_YAS_532_ENABLE)		+= yas532/
-obj-$(CONFIG_OPTICAL_GP2A)	+= gp2a_proximity.o gp2a_light.o
-obj-$(CONFIG_OPTICAL_GP2AP020A00F)	+= gp2ap020.o
-obj-$(CONFIG_OPTICAL_TAOS_TRITON)		+= taos.o
-obj-$(CONFIG_SENSORS_AL3201)		+= al3201.o
-obj-$(CONFIG_VP_A2220)		+= a2220.o
-obj-$(CONFIG_SENSORS_CM36651)		+= cm36651.o
-obj-$(CONFIG_QSEECOM) += tzic.o
-obj-$(CONFIG_ADC_STMPE811)		+= stmpe811.o
-obj-$(CONFIG_SAMSUNG_JACK)		+= sec_jack.o
-obj-$(CONFIG_OPTICAL_BH1721) += bh1721.o
+obj-$(CONFIG_STMPE811_ADC)	+= stmpe811-adc.o
+obj-$(CONFIG_JACK_MON)		+= jack.o
+obj-$(CONFIG_UART_SELECT)	+= uart_select.o
+obj-$(CONFIG_WIMAX_CMC)         += max8893.o
+ifeq ($(CONFIG_MUIC_DET_JACK),y)
+obj-$(CONFIG_SEC_DEV_JACK)	+= sec_jack_muic.o
+else
+obj-$(CONFIG_SEC_DEV_JACK)	+= sec_jack.o
+endif
+obj-$(CONFIG_MUIC_MAX8997)	+= max8997-muic.o
+obj-$(CONFIG_PN544)		+= pn544.o
+obj-$(CONFIG_FM34_WE395)	+= fm34_we395.o
+obj-$(CONFIG_AUDIENCE_ES305)	+= es305.o
+obj-y				+= 2mic/
+
+obj-$(CONFIG_SLP_PROCESS_MON)	+= slp_process_monitor.o
+obj-$(CONFIG_SLP_LOWMEM_NOTIFY)	+= slp_lowmem_notify.o
+
+obj-$(CONFIG_MACH_M0_CTC)   += cw_tty.o
+
+# Secure OS Mobicore Interface
+obj-$(CONFIG_MOBICORE_SUPPORT)  += tzic.o

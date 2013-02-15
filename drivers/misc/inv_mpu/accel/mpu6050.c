@@ -61,7 +61,6 @@ struct mpu6050_private_data {
 	struct mldl_cfg *mldl_cfg_ref;
 };
 
-
 static int mpu6050_set_mldl_cfg_ref(void *mlsl_handle,
 			struct ext_slave_platform_data *pdata,
 			struct mldl_cfg *mldl_cfg_ref)
@@ -76,51 +75,49 @@ static int mpu6050_set_lp_mode(void *mlsl_handle,
 			unsigned char lpa_freq)
 {
 	unsigned char b = 0;
-	int result = INV_SUCCESS;
 	/* Reducing the duration setting for lp mode */
 	b = 1;
-	result |= inv_serial_single_write(mlsl_handle, pdata->address,
+	inv_serial_single_write(mlsl_handle, pdata->address,
 				MPUREG_ACCEL_MOT_DUR, b);
 	/* Setting the cycle bit and LPA wake up freq */
 	inv_serial_read(mlsl_handle, pdata->address, MPUREG_PWR_MGMT_1, 1,
 			&b);
 	b |= BIT_CYCLE | BIT_PD_PTAT;
-	result |= inv_serial_single_write(mlsl_handle, pdata->address,
+	inv_serial_single_write(mlsl_handle, pdata->address,
 				MPUREG_PWR_MGMT_1,
 				b);
 	inv_serial_read(mlsl_handle, pdata->address,
 			MPUREG_PWR_MGMT_2, 1, &b);
 	b |= lpa_freq & BITS_LPA_WAKE_CTRL;
-	result |= inv_serial_single_write(mlsl_handle, pdata->address,
+	inv_serial_single_write(mlsl_handle, pdata->address,
 				MPUREG_PWR_MGMT_2, b);
 
-	return result;
+	return INV_SUCCESS;
 }
 
 static int mpu6050_set_fp_mode(void *mlsl_handle,
 				struct ext_slave_platform_data *pdata)
 {
 	unsigned char b;
-	int result = INV_SUCCESS;
 	struct mpu6050_private_data *private_data =
 			(struct mpu6050_private_data *)pdata->private_data;
 	/* Resetting the cycle bit and LPA wake up freq */
 	inv_serial_read(mlsl_handle, pdata->address,
 			MPUREG_PWR_MGMT_1, 1, &b);
 	b &= ~BIT_CYCLE & ~BIT_PD_PTAT;
-	result |= inv_serial_single_write(mlsl_handle, pdata->address,
+	inv_serial_single_write(mlsl_handle, pdata->address,
 				MPUREG_PWR_MGMT_1, b);
 	inv_serial_read(mlsl_handle, pdata->address,
 			MPUREG_PWR_MGMT_2, 1, &b);
 	b &= ~BITS_LPA_WAKE_CTRL;
-	result |= inv_serial_single_write(mlsl_handle, pdata->address,
+	inv_serial_single_write(mlsl_handle, pdata->address,
 				MPUREG_PWR_MGMT_2, b);
 	/* Resetting the duration setting for fp mode */
 	b = (unsigned char)private_data->suspend.ths / ACCEL_MOT_DUR_LSB;
-	result |= inv_serial_single_write(mlsl_handle, pdata->address,
+	inv_serial_single_write(mlsl_handle, pdata->address,
 				MPUREG_ACCEL_MOT_DUR, b);
 
-	return result;
+	return INV_SUCCESS;
 }
 /**
  * Record the odr for use in computing duration values.
@@ -128,7 +125,7 @@ static int mpu6050_set_fp_mode(void *mlsl_handle,
  * @param config Config to set, suspend or resume structure
  * @param odr output data rate in 1/1000 hz
  */
-int mpu6050_set_odr(void *mlsl_handle,
+static int mpu6050_set_odr(void *mlsl_handle,
 			  struct ext_slave_platform_data *pdata,
 			  struct mpu6050_config *config, long apply, long odr)
 {
@@ -167,7 +164,6 @@ int mpu6050_set_odr(void *mlsl_handle,
 	    && (mldl_cfg_ref &&
 	    !(mldl_cfg_ref->inv_mpu_cfg->requested_sensors &
 		    INV_DMP_PROCESSOR))) {
-		MPL_LOGI("mpu6050_set_odr:%d\n", total_divider);
 		result = inv_serial_single_write(mlsl_handle, pdata->address,
 					MPUREG_SMPLRT_DIV,
 					(unsigned char)total_divider);
@@ -175,7 +171,7 @@ int mpu6050_set_odr(void *mlsl_handle,
 			LOG_RESULT_LOCATION(result);
 			return result;
 		}
-		MPL_LOGI("ODR : %d (%d)mHz\n", config->odr, total_divider);
+		MPL_LOGI("ODR : %d mHz\n", config->odr);
 	}
 	/* Decide whether to put accel in LP mode or pull out of LP mode
 	   based on the odr. */
@@ -197,18 +193,14 @@ int mpu6050_set_odr(void *mlsl_handle,
 				MPUREG_PWR_MGMT_1, 1, &b);
 		b &= BIT_CYCLE;
 		if (b == BIT_CYCLE) {
-			MPL_LOGI("Accel LP - > FP mode.\n");
-			result = mpu6050_set_fp_mode(mlsl_handle, pdata);
-			if (result)
-				LOG_RESULT_LOCATION(result);
+			MPL_LOGI(" Accel LP - > FP mode.\n ");
+			mpu6050_set_fp_mode(mlsl_handle, pdata);
 		}
 	}
 	/* If lpa_freq default value was changed, set into LP mode */
 	if (lpa_freq != 1) {
-		MPL_LOGI("Accel FP - > LP mode.\n");
-		result = mpu6050_set_lp_mode(mlsl_handle, pdata, lpa_freq);
-		if (result)
-			LOG_RESULT_LOCATION(result);
+		MPL_LOGI(" Accel FP - > LP mode.\n ");
+		mpu6050_set_lp_mode(mlsl_handle, pdata, lpa_freq);
 	}
 	return 0;
 }
@@ -222,7 +214,7 @@ static int mpu6050_set_fsr(void *mlsl_handle,
 
 	if (fsr <= 2000) {
 		config->fsr = 2000;
-		fsr_mask = 0x01;
+		fsr_mask = 0x00;
 	} else if (fsr <= 4000) {
 		config->fsr = 4000;
 		fsr_mask = 0x08;
@@ -254,18 +246,48 @@ static int mpu6050_set_fsr(void *mlsl_handle,
 	return 0;
 }
 
-/* ACCEL IRQ is not used */
 static int mpu6050_set_irq(void *mlsl_handle,
 			  struct ext_slave_platform_data *pdata,
 			  struct mpu6050_config *config, long apply,
 			  long irq_type)
 {
+	int result;
+	unsigned char reg_int_cfg;
+
+	return 0;
+
+	switch (irq_type) {
+	case MPU_SLAVE_IRQ_TYPE_DATA_READY:
+		config->irq_type = irq_type;
+		reg_int_cfg = BIT_RAW_RDY_EN;
+		break;
+	/* todo: add MOTION, NO_MOTION, and FREEFALL */
+	case MPU_SLAVE_IRQ_TYPE_NONE:
+		/* Do nothing, not even set the interrupt because it is
+		   shared with the gyro */
+		config->irq_type = irq_type;
+		return 0;
+	default:
+		return INV_ERROR_INVALID_PARAMETER;
+	}
+
+	if (apply) {
+		result = inv_serial_single_write(mlsl_handle, pdata->address,
+						 MPUREG_INT_ENABLE,
+						 reg_int_cfg);
+		if (result) {
+			LOG_RESULT_LOCATION(result);
+			return result;
+		}
+		MPL_LOGV("irq_type: %d\n", config->irq_type);
+	}
+
 	return 0;
 }
 
 static int mpu6050_set_ths(void *mlsl_handle,
-			  struct ext_slave_platform_data *slave,
-			  struct mpu6050_config *config, long apply, long ths)
+			   struct ext_slave_platform_data *slave,
+			   struct mpu6050_config *config, long apply, long ths)
 {
 	if (ths < 0)
 		ths = 0;
@@ -276,8 +298,8 @@ static int mpu6050_set_ths(void *mlsl_handle,
 }
 
 static int mpu6050_set_dur(void *mlsl_handle,
-			  struct ext_slave_platform_data *slave,
-			  struct mpu6050_config *config, long apply, long dur)
+			struct ext_slave_platform_data *slave,
+			struct mpu6050_config *config, long apply, long dur)
 {
 	if (dur < 0)
 		dur = 0;
@@ -289,8 +311,8 @@ static int mpu6050_set_dur(void *mlsl_handle,
 
 
 static int mpu6050_init(void *mlsl_handle,
-		       struct ext_slave_descr *slave,
-		       struct ext_slave_platform_data *pdata)
+			struct ext_slave_descr *slave,
+			struct ext_slave_platform_data *pdata)
 {
 	int result;
 	struct mpu6050_private_data *private_data;
@@ -342,25 +364,25 @@ static int mpu6050_init(void *mlsl_handle,
 	}
 
 	result = mpu6050_set_ths(mlsl_handle, pdata, &private_data->suspend,
-				 false, 128);
+				 false, 80);
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
 	}
 	result = mpu6050_set_ths(mlsl_handle, pdata, &private_data->resume,
-				 false, 128);
+				 false, 40);
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
 	}
 	result = mpu6050_set_dur(mlsl_handle, pdata, &private_data->suspend,
-				 false, 2);
+				 false, 1000);
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
 	}
 	result = mpu6050_set_dur(mlsl_handle, pdata, &private_data->resume,
-				 false, 2);
+				 false, 2540);
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
@@ -370,8 +392,8 @@ static int mpu6050_init(void *mlsl_handle,
 }
 
 static int mpu6050_exit(void *mlsl_handle,
-		       struct ext_slave_descr *slave,
-		       struct ext_slave_platform_data *pdata)
+			struct ext_slave_descr *slave,
+			struct ext_slave_platform_data *pdata)
 {
 	kfree(pdata->private_data);
 	pdata->private_data = NULL;
@@ -428,9 +450,6 @@ static int mpu6050_resume(void *mlsl_handle,
 	struct mpu6050_private_data *private_data =
 		(struct mpu6050_private_data *)pdata->private_data;
 
-	struct mldl_cfg *mldl_cfg_ref =
-				(struct mldl_cfg *)private_data->mldl_cfg_ref;
-
 	result = inv_serial_read(mlsl_handle, pdata->address,
 				 MPUREG_PWR_MGMT_1, 1, &reg);
 	if (result) {
@@ -446,7 +465,7 @@ static int mpu6050_resume(void *mlsl_handle,
 			return result;
 		}
 	}
-	mdelay(2);
+	msleep(20);
 
 	result = inv_serial_read(mlsl_handle, pdata->address,
 			MPUREG_PWR_MGMT_2, 1, &reg);
@@ -456,22 +475,13 @@ static int mpu6050_resume(void *mlsl_handle,
 	}
 	reg &= ~(BIT_STBY_XA | BIT_STBY_YA | BIT_STBY_ZA);
 	result = inv_serial_single_write(mlsl_handle, pdata->address,
-				       MPUREG_PWR_MGMT_2, reg);
+					MPUREG_PWR_MGMT_2, reg);
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
 	}
 
 	/* settings */
-
-	/*----- LPF configuration  : 44hz ---->*/
-	reg =
-		MPUREG_CONFIG_VALUE(mldl_cfg_ref->mpu_gyro_cfg->ext_sync,
-		mldl_cfg_ref->mpu_gyro_cfg->lpf);
-	result =
-		inv_serial_single_write(mlsl_handle,
-		mldl_cfg_ref->mpu_chip_info->addr, MPUREG_CONFIG, reg);
-	/*<----- LPF configuration  : 44hz ----*/
 
 	result = mpu6050_set_fsr(mlsl_handle, pdata, &private_data->resume,
 				 true, private_data->resume.fsr);
@@ -500,7 +510,7 @@ static int mpu6050_resume(void *mlsl_handle,
 		return result;
 	}
 	reg = (unsigned char)
-	    ACCEL_ZRMOT_THR_LSB_CONVERSION(private_data->resume.ths);
+		ACCEL_ZRMOT_THR_LSB_CONVERSION(private_data->resume.ths);
 	result = inv_serial_single_write(mlsl_handle, pdata->address,
 					 MPUREG_ACCEL_ZRMOT_THR, reg);
 	if (result) {
@@ -531,13 +541,28 @@ static int mpu6050_read(void *mlsl_handle,
 {
 	int result;
 	int x, y, z;
+
 	result = inv_serial_read(mlsl_handle, pdata->address,
 				 slave->read_reg, slave->read_len, data);
-
+#if 1
 	if (slave->read_len == 6) {
+		/*
+		pr_info("\n mantis_read cal x: %d y: %d z: %d\",
+				cal_data.x, cal_data.y, cal_data.z);
+
+		x = (s16)((data[0] <<8) |data[1]);
+		y = (s16)((data[2] <<8) |data[3]);
+		z = (s16)((data[4] <<8) |data[5]);
+
+		pr_info("mantis_read RAW x: %d y: %d z: %d", x, y, z);
+		*/
 		x = (s16)((data[0] << 8) | data[1]) - cal_data.x;
 		y = (s16)((data[2] << 8) | data[3]) - cal_data.y;
 		z = (s16)((data[4] << 8) | data[5]) - cal_data.z;
+
+		/*
+		pr_info("mantis_read CAL x: %d y: %d z: %d", x, y, z);
+		*/
 
 		data[0] = (x & 0xff00) >> 8;
 		data[1] = ((x << 4) >> 4) & 0xff;
@@ -545,8 +570,15 @@ static int mpu6050_read(void *mlsl_handle,
 		data[3] = ((y << 4) >> 4) & 0xff;
 		data[4] = (z & 0xff00) >> 8;
 		data[5] = ((z << 4) >> 4) & 0xff;
-}
+/*
+		x = (s16)((data[0] <<8) |data[1]);
+		y = (s16)((data[2] <<8) |data[3]);
+		z = (s16)((data[4] <<8) |data[5]);
 
+		pr_info("mantis_read CHK x: %d y: %d z: %d", x, y, z);
+*/
+	}
+#endif
 	return result;
 }
 

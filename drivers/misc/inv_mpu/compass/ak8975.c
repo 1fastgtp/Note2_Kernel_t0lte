@@ -68,7 +68,6 @@ struct ak8975_private_data {
 };
 
 /* -------------------------------------------------------------------------- */
-
 static int ak8975_init(void *mlsl_handle,
 		       struct ext_slave_descr *slave,
 		       struct ext_slave_platform_data *pdata)
@@ -151,7 +150,7 @@ static int ak8975_suspend(void *mlsl_handle,
 	    inv_serial_single_write(mlsl_handle, pdata->address,
 				    AK8975_REG_CNTL,
 				    AK8975_CNTL_MODE_POWER_DOWN);
-	mdelay(1);		/* wait at least 100us */
+	msleep(20);		/* wait at least 100us */
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
@@ -174,6 +173,7 @@ static int ak8975_resume(void *mlsl_handle,
 	}
 	return result;
 }
+
 static int ak8975_read(void *mlsl_handle,
 		struct ext_slave_descr *slave,
 		struct ext_slave_platform_data *pdata, unsigned char *data)

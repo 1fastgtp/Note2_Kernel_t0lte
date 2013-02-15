@@ -67,7 +67,7 @@ struct eth_dev {
 
 	spinlock_t		req_lock;	/* guard {rx,tx}_reqs */
 	struct list_head	tx_reqs, rx_reqs;
-	unsigned		tx_qlen;
+	atomic_t		tx_qlen;
 
 	struct sk_buff_head	rx_frames;
 
@@ -97,16 +97,17 @@ struct eth_dev {
 
 static unsigned qmult = 5;
 module_param(qmult, uint, S_IRUGO|S_IWUSR);
-MODULE_PARM_DESC(qmult, "queue length multiplier at high speed");
+MODULE_PARM_DESC(qmult, "queue length multiplier at high/super speed");
 
 #else	/* full speed (low speed doesn't do bulk) */
 #define qmult		1
 #endif
 
-/* for dual-speed hardware, use deeper queues at highspeed */
+/* for dual-speed hardware, use deeper queues at high/super speed */
 static inline int qlen(struct usb_gadget *gadget)
 {
-	if (gadget_is_dualspeed(gadget) && gadget->speed == USB_SPEED_HIGH)
+	if (gadget_is_dualspeed(gadget) && (gadget->speed == USB_SPEED_HIGH ||
+					    gadget->speed == USB_SPEED_SUPER))
 		return qmult * DEFAULT_QLEN;
 	else
 		return DEFAULT_QLEN;
@@ -242,8 +243,11 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 
 	if (dev->port_usb->is_fixed)
 		size = max_t(size_t, size, dev->port_usb->fixed_out_len);
-
+#ifdef CONFIG_USB_S3C_OTGD
+	skb = alloc_skb(size + NET_IP_ALIGN + 6, gfp_flags);
+#else
 	skb = alloc_skb(size + NET_IP_ALIGN, gfp_flags);
+#endif
 	if (skb == NULL) {
 		DBG(dev, "no rx skb\n");
 		goto enomem;
@@ -253,8 +257,11 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 	 * but on at least one, checksumming fails otherwise.  Note:
 	 * RNDIS headers involve variable numbers of LE32 values.
 	 */
+#ifdef CONFIG_USB_S3C_OTGD
+	skb_reserve(skb, NET_IP_ALIGN + 6);
+#else
 	skb_reserve(skb, NET_IP_ALIGN);
-
+#endif
 	req->buf = skb->data;
 	req->length = size;
 	req->complete = rx_complete;
@@ -482,8 +489,14 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 	spin_lock(&dev->req_lock);
 	list_add(&req->list, &dev->tx_reqs);
 	spin_unlock(&dev->req_lock);
+
+#ifdef CONFIG_USB_S3C_OTGD
+	if (req->buf != skb->data)
+		kfree(req->buf);
+#endif
 	dev_kfree_skb_any(skb);
 
+	atomic_dec(&dev->tx_qlen);
 	if (netif_carrier_ok(dev->net))
 		netif_wake_queue(dev->net);
 }
@@ -576,7 +589,19 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 		length = skb->len;
 	}
+#ifdef CONFIG_USB_S3C_OTGD
+	/* for double word align  */
+	req->buf = kmalloc(skb->len, GFP_ATOMIC | GFP_DMA);
+
+	if (!req->buf) {
+		req->buf = skb->data;
+		ERROR(dev, "fail to kmalloc[req->buf = skb->data]\n");
+	} else {
+		memcpy((void *)req->buf, (void *)skb->data, skb->len);
+	}
+#else
 	req->buf = skb->data;
+#endif
 	req->context = skb;
 	req->complete = tx_complete;
 
@@ -597,19 +622,12 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 	req->length = length;
 
-	/* throttle highspeed IRQ rate back slightly */
-	if (gadget_is_dualspeed(dev->gadget) &&
-			 (dev->gadget->speed == USB_SPEED_HIGH)) {
-		dev->tx_qlen++;
-		if (dev->tx_qlen == qmult) {
-			req->no_interrupt = 0;
-			dev->tx_qlen = 0;
-		} else {
-			req->no_interrupt = 1;
-		}
-	} else {
-		req->no_interrupt = 0;
-	}
+	/* throttle high/super speed IRQ rate back slightly */
+	if (gadget_is_dualspeed(dev->gadget))
+		req->no_interrupt = (dev->gadget->speed == USB_SPEED_HIGH ||
+				     dev->gadget->speed == USB_SPEED_SUPER)
+			? ((atomic_read(&dev->tx_qlen) % qmult) != 0)
+			: 0;
 
 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
 	switch (retval) {
@@ -618,12 +636,18 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 		break;
 	case 0:
 		net->trans_start = jiffies;
+		atomic_inc(&dev->tx_qlen);
 	}
 
 	if (retval) {
+#ifdef CONFIG_USB_S3C_OTGD
+		if (req->buf != skb->data)
+			kfree(req->buf);
+#endif
 		dev_kfree_skb_any(skb);
 drop:
 		dev->net->stats.tx_dropped++;
+
 		spin_lock_irqsave(&dev->req_lock, flags);
 		if (list_empty(&dev->tx_reqs))
 			netif_start_queue(net);
@@ -642,7 +666,7 @@ static void eth_start(struct eth_dev *dev, gfp_t gfp_flags)
 	rx_fill(dev, gfp_flags);
 
 	/* and open the tx floodgates */
-	dev->tx_qlen = 0;
+	atomic_set(&dev->tx_qlen, 0);
 	netif_wake_queue(dev->net);
 }
 
@@ -834,12 +858,6 @@ int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 
 	SET_ETHTOOL_OPS(net, &ops);
 
-	/* two kinds of host-initiated state changes:
-	 *  - iff DATA transfer is active, carrier is "on"
-	 *  - tx queueing enabled if open *and* carrier is "on"
-	 */
-	netif_carrier_off(net);
-
 	dev->gadget = g;
 	SET_NETDEV_DEV(net, &g->dev);
 	SET_NETDEV_DEVTYPE(net, &gadget_type);
@@ -849,7 +867,16 @@ int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 		dev_dbg(&g->dev, "register_netdev failed, %d\n", status);
 		free_netdev(net);
 	} else {
+		INFO(dev, "MAC %pM\n", net->dev_addr);
+		INFO(dev, "HOST MAC %pM\n", dev->host_mac);
+
 		the_dev = dev;
+
+		/* two kinds of host-initiated state changes:
+		 *  - iff DATA transfer is active, carrier is "on"
+		 *  - tx queueing enabled if open *and* carrier is "on"
+		 */
+		netif_carrier_off(net);
 	}
 
 	return status;

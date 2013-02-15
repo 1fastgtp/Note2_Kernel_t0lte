@@ -27,6 +27,7 @@
 #include <linux/utsname.h>
 
 #include <linux/usb/composite.h>
+#include <asm/unaligned.h>
 
 #include "multi_config.h"
 /*
@@ -42,7 +43,7 @@
  */
 
 /* big enough to hold our biggest descriptor */
-#define USB_BUFSIZ	4096
+#define USB_BUFSIZ	1024
 
 static struct usb_composite_driver *composite;
 static int (*composite_gadget_bind)(struct usb_composite_dev *cdev);
@@ -79,7 +80,6 @@ MODULE_PARM_DESC(iSerialNumber, "SerialNumber string");
 static char composite_manufacturer[50];
 
 /*-------------------------------------------------------------------------*/
-
 /**
  * usb_add_function() - add a function to a configuration
  * @config: the configuration
@@ -128,6 +128,8 @@ int usb_add_function(struct usb_configuration *config,
 		config->fullspeed = true;
 	if (!config->highspeed && function->hs_descriptors)
 		config->highspeed = true;
+	if (!config->superspeed && function->ss_descriptors)
+		config->superspeed = true;
 
 done:
 	if (value)
@@ -283,10 +285,17 @@ static int config_buf(struct usb_configuration *config,
 			USB_DBG("f->%s\n", f->name);
 		}
 #endif
-		if (speed == USB_SPEED_HIGH)
+		switch (speed) {
+		case USB_SPEED_SUPER:
+			descriptors = f->ss_descriptors;
+			break;
+		case USB_SPEED_HIGH:
 			descriptors = f->hs_descriptors;
-		else
+			break;
+		default:
 			descriptors = f->descriptors;
+		}
+
 		if (!descriptors)
 			continue;
 		status = usb_descriptor_fillbuf(next, len,
@@ -302,6 +311,7 @@ static int config_buf(struct usb_configuration *config,
 		len -= status;
 		next += status;
 	}
+
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 	set_interface_count(config, c);
 #endif
@@ -317,9 +327,10 @@ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 	u8				type = w_value >> 8;
 	enum usb_device_speed		speed = USB_SPEED_UNKNOWN;
 
-	if (gadget_is_dualspeed(gadget)) {
-		int			hs = 0;
-
+	if (gadget->speed == USB_SPEED_SUPER)
+		speed = gadget->speed;
+	else if (gadget_is_dualspeed(gadget)) {
+		int	hs = 0;
 		if (gadget->speed == USB_SPEED_HIGH)
 			hs = 1;
 		if (type == USB_DT_OTHER_SPEED_CONFIG)
@@ -336,13 +347,29 @@ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 #endif
 	list_for_each_entry(c, &cdev->configs, list) {
 		/* ignore configs that won't work at this speed */
-		if (speed == USB_SPEED_HIGH) {
+		switch (speed) {
+		case USB_SPEED_SUPER:
+			if (!c->superspeed)
+				continue;
+			/* USB 3.0 Max power < 900 mA */
+			if (c->bMaxPower > 0x70) /* 896mA = 0x70 * 8mA */
+				c->bMaxPower = 0x70; /* 896 mA */
+			break;
+		case USB_SPEED_HIGH:
 			if (!c->highspeed)
 				continue;
-		} else {
+			/* USB 2.0 Max power < 500 mA */
+			if (c->bMaxPower > 0xFA) /* 500mA = 0xFA * 2mA */
+				c->bMaxPower = 0xFA; /* 500 mA */
+			break;
+		default:
 			if (!c->fullspeed)
 				continue;
+			/* USB 2.0 Max power < 500 mA */
+			if (c->bMaxPower > 0xFA) /* 500mA = 0xFA * 2mA */
+				c->bMaxPower = 0xFA; /* 500 mA */
 		}
+
 		if (w_value == 0)
 			return config_buf(c, speed, cdev->req->buf, type);
 		w_value--;
@@ -356,16 +383,22 @@ static int count_configs(struct usb_composite_dev *cdev, unsigned type)
 	struct usb_configuration	*c;
 	unsigned			count = 0;
 	int				hs = 0;
+	int				ss = 0;
 
 	if (gadget_is_dualspeed(gadget)) {
 		if (gadget->speed == USB_SPEED_HIGH)
 			hs = 1;
+		if (gadget->speed == USB_SPEED_SUPER)
+			ss = 1;
 		if (type == USB_DT_DEVICE_QUALIFIER)
 			hs = !hs;
 	}
 	list_for_each_entry(c, &cdev->configs, list) {
 		/* ignore configs that won't work at this speed */
-		if (hs) {
+		if (ss) {
+			if (!c->superspeed)
+				continue;
+		} else if (hs) {
 			if (!c->highspeed)
 				continue;
 		} else {
@@ -380,6 +413,71 @@ static int count_configs(struct usb_composite_dev *cdev, unsigned type)
 	return count;
 }
 
+/**
+ * bos_desc() - prepares the BOS descriptor.
+ * @cdev: pointer to usb_composite device to generate the bos
+ *	descriptor for
+ *
+ * This function generates the BOS (Binary Device Object)
+ * descriptor and its device capabilities descriptors. The BOS
+ * descriptor should be supported by a SuperSpeed device.
+ */
+static int bos_desc(struct usb_composite_dev *cdev)
+{
+	struct usb_ext_cap_descriptor	*usb_ext;
+	struct usb_ss_cap_descriptor	*ss_cap;
+	struct usb_dcd_config_params	dcd_config_params;
+	struct usb_bos_descriptor	*bos = cdev->req->buf;
+
+	bos->bLength = USB_DT_BOS_SIZE;
+	bos->bDescriptorType = USB_DT_BOS;
+
+	bos->wTotalLength = cpu_to_le16(USB_DT_BOS_SIZE);
+	bos->bNumDeviceCaps = 0;
+
+	/*
+	 * A SuperSpeed device shall include the USB2.0 extension descriptor
+	 * and shall support LPM when operating in USB2.0 HS mode.
+	 */
+	usb_ext = cdev->req->buf + le16_to_cpu(bos->wTotalLength);
+	bos->bNumDeviceCaps++;
+	le16_add_cpu(&bos->wTotalLength, USB_DT_USB_EXT_CAP_SIZE);
+	usb_ext->bLength = USB_DT_USB_EXT_CAP_SIZE;
+	usb_ext->bDescriptorType = USB_DT_DEVICE_CAPABILITY;
+	usb_ext->bDevCapabilityType = USB_CAP_TYPE_EXT;
+	usb_ext->bmAttributes = cpu_to_le32(USB_LPM_SUPPORT);
+
+	/*
+	 * The Superspeed USB Capability descriptor shall be implemented by all
+	 * SuperSpeed devices.
+	 */
+	ss_cap = cdev->req->buf + le16_to_cpu(bos->wTotalLength);
+	bos->bNumDeviceCaps++;
+	le16_add_cpu(&bos->wTotalLength, USB_DT_USB_SS_CAP_SIZE);
+	ss_cap->bLength = USB_DT_USB_SS_CAP_SIZE;
+	ss_cap->bDescriptorType = USB_DT_DEVICE_CAPABILITY;
+	ss_cap->bDevCapabilityType = USB_SS_CAP_TYPE;
+	ss_cap->bmAttributes = 0; /* LTM is not supported yet */
+	ss_cap->wSpeedSupported = cpu_to_le16(USB_LOW_SPEED_OPERATION |
+				USB_FULL_SPEED_OPERATION |
+				USB_HIGH_SPEED_OPERATION |
+				USB_5GBPS_OPERATION);
+	ss_cap->bFunctionalitySupport = USB_LOW_SPEED_OPERATION;
+
+	/* Get Controller configuration */
+	if (cdev->gadget->ops->get_config_params)
+		cdev->gadget->ops->get_config_params(&dcd_config_params);
+	else {
+		dcd_config_params.bU1devExitLat = USB_DEFAULT_U1_DEV_EXIT_LAT;
+		dcd_config_params.bU2DevExitLat =
+			cpu_to_le16(USB_DEFAULT_U2_DEV_EXIT_LAT);
+	}
+	ss_cap->bU1devExitLat = dcd_config_params.bU1devExitLat;
+	ss_cap->bU2DevExitLat = dcd_config_params.bU2DevExitLat;
+
+	return le16_to_cpu(bos->wTotalLength);
+}
+
 static void device_qual(struct usb_composite_dev *cdev)
 {
 	struct usb_qualifier_descriptor	*qual = cdev->req->buf;
@@ -392,7 +490,7 @@ static void device_qual(struct usb_composite_dev *cdev)
 	qual->bDeviceSubClass = cdev->desc.bDeviceSubClass;
 	qual->bDeviceProtocol = cdev->desc.bDeviceProtocol;
 	/* ASSUME same EP0 fifo size at both speeds */
-	qual->bMaxPacketSize0 = cdev->desc.bMaxPacketSize0;
+	qual->bMaxPacketSize0 = cdev->gadget->ep0->maxpacket;
 	qual->bNumConfigurations = count_configs(cdev, USB_DT_DEVICE_QUALIFIER);
 	qual->bRESERVED = 0;
 }
@@ -423,25 +521,32 @@ static int set_config(struct usb_composite_dev *cdev,
 	unsigned		power = gadget_is_otg(gadget) ? 8 : 100;
 	int			tmp;
 
-	if (cdev->config)
-		reset_config(cdev);
-
 	if (number) {
 		list_for_each_entry(c, &cdev->configs, list) {
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 			if (c->bConfigurationValue == number ||
-							check_config(number)) {
+					check_config(number)) {
 #else
 			if (c->bConfigurationValue == number) {
 #endif
+				/*
+				 * We disable the FDs of the previous
+				 * configuration only if the new configuration
+				 * is a valid one
+				 */
+				if (cdev->config)
+					reset_config(cdev);
 				result = 0;
 				break;
 			}
 		}
 		if (result < 0)
 			goto done;
-	} else
+	} else { /* Zero configuration value - need to reset the config */
+		if (cdev->config)
+			reset_config(cdev);
 		result = 0;
+	}
 
 	INFO(cdev, "%s speed config #%d: %s\n",
 		({ char *speed;
@@ -449,6 +554,7 @@ static int set_config(struct usb_composite_dev *cdev,
 		case USB_SPEED_LOW:	speed = "low"; break;
 		case USB_SPEED_FULL:	speed = "full"; break;
 		case USB_SPEED_HIGH:	speed = "high"; break;
+		case USB_SPEED_SUPER:	speed = "super"; break;
 		default:		speed = "?"; break;
 		} ; speed; }), number, c ? c->label : "unconfigured");
 
@@ -464,17 +570,25 @@ static int set_config(struct usb_composite_dev *cdev,
 
 		if (!f)
 			break;
-
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+		USB_DBG_ESS("e %s[%d]\n", f->name, tmp);
+#endif
 		/*
 		 * Record which endpoints are used by the function. This is used
 		 * to dispatch control requests targeted at that endpoint to the
 		 * function's setup callback instead of the current
 		 * configuration's setup callback.
 		 */
-		if (gadget->speed == USB_SPEED_HIGH)
+		switch (gadget->speed) {
+		case USB_SPEED_SUPER:
+			descriptors = f->ss_descriptors;
+			break;
+		case USB_SPEED_HIGH:
 			descriptors = f->hs_descriptors;
-		else
+			break;
+		default:
 			descriptors = f->descriptors;
+		}
 
 		for (; *descriptors; ++descriptors) {
 			struct usb_endpoint_descriptor *ep;
@@ -564,13 +678,27 @@ int usb_add_config(struct usb_composite_dev *cdev,
 
 	status = bind(config);
 	if (status < 0) {
+		while (!list_empty(&config->functions)) {
+			struct usb_function		*f;
+
+			f = list_first_entry(&config->functions,
+					struct usb_function, list);
+			list_del(&f->list);
+			if (f->unbind) {
+				DBG(cdev, "unbind function '%s'/%p\n",
+					f->name, f);
+				f->unbind(config, f);
+				/* may free memory for "f" */
+			}
+		}
 		list_del(&config->list);
 		config->cdev = NULL;
 	} else {
 		unsigned	i;
 
-		DBG(cdev, "cfg %d/%p speeds:%s%s\n",
+		DBG(cdev, "cfg %d/%p speeds:%s%s%s\n",
 			config->bConfigurationValue, config,
+			config->superspeed ? " super" : "",
 			config->highspeed ? " high" : "",
 			config->fullspeed
 				? (gadget_is_dualspeed(cdev->gadget)
@@ -907,16 +1035,13 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
 	struct usb_request		*req = cdev->req;
 	int				value = -EOPNOTSUPP;
+	int				status = 0;
 	u16				w_index = le16_to_cpu(ctrl->wIndex);
 	u8				intf = w_index & 0xFF;
 	u16				w_value = le16_to_cpu(ctrl->wValue);
 	u16				w_length = le16_to_cpu(ctrl->wLength);
 	struct usb_function		*f = NULL;
 	u8				endp;
-
-
-	if (w_length > USB_BUFSIZ)
-		return value;
 
 	/* partial re-init of the response message; the function or the
 	 * gadget might need to intercept e.g. a control-OUT completion
@@ -938,19 +1063,32 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		case USB_DT_DEVICE:
 			cdev->desc.bNumConfigurations =
 				count_configs(cdev, USB_DT_DEVICE);
+			cdev->desc.bMaxPacketSize0 =
+				cdev->gadget->ep0->maxpacket;
+			if (gadget_is_superspeed(gadget)) {
+				if (gadget->speed >= USB_SPEED_SUPER) {
+					cdev->desc.bcdUSB = cpu_to_le16(0x0300);
+					cdev->desc.bMaxPacketSize0 = 9;
+				} else {
+					cdev->desc.bcdUSB = cpu_to_le16(0x0210);
+				}
+			}
+
 			value = min(w_length, (u16) sizeof cdev->desc);
 			memcpy(req->buf, &cdev->desc, value);
 			printk(KERN_DEBUG "usb: GET_DES\n");
 			break;
 		case USB_DT_DEVICE_QUALIFIER:
-			if (!gadget_is_dualspeed(gadget))
+			if (!gadget_is_dualspeed(gadget) ||
+			    gadget->speed >= USB_SPEED_SUPER)
 				break;
 			device_qual(cdev);
 			value = min_t(int, w_length,
 				sizeof(struct usb_qualifier_descriptor));
 			break;
 		case USB_DT_OTHER_SPEED_CONFIG:
-			if (!gadget_is_dualspeed(gadget))
+			if (!gadget_is_dualspeed(gadget) ||
+			    gadget->speed >= USB_SPEED_SUPER)
 				break;
 			/* FALLTHROUGH */
 		case USB_DT_CONFIG:
@@ -961,13 +1099,17 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		case USB_DT_STRING:
 #ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
 			set_string_mode(w_length);
-			if (w_length == 2)
-				cdev->mac_connected = 1;
 #endif
 			value = get_string(cdev, req->buf,
 					w_index, w_value & 0xff);
 			if (value >= 0)
 				value = min(w_length, (u16) value);
+			break;
+		case USB_DT_BOS:
+			if (gadget_is_superspeed(gadget)) {
+				value = bos_desc(cdev);
+				value = min(w_length, (u16) value);
+			}
 			break;
 		}
 		break;
@@ -1040,6 +1182,61 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			break;
 		*((u8 *)req->buf) = value;
 		value = min(w_length, (u16) 1);
+		break;
+
+	/*
+	 * USB 3.0 additions:
+	 * Function driver should handle get_status request. If such cb
+	 * wasn't supplied we respond with default value = 0
+	 * Note: function driver should supply such cb only for the first
+	 * interface of the function
+	 */
+	case USB_REQ_GET_STATUS:
+		if (!gadget_is_superspeed(gadget))
+			goto unknown;
+		if (ctrl->bRequestType != (USB_DIR_IN | USB_RECIP_INTERFACE))
+			goto unknown;
+		value = 2;	/* This is the length of the get_status reply */
+		put_unaligned_le16(0, req->buf);
+		if (!cdev->config || intf >= MAX_CONFIG_INTERFACES)
+			break;
+		f = cdev->config->interface[intf];
+		if (!f)
+			break;
+		status = f->get_status ? f->get_status(f) : 0;
+		if (status < 0)
+			break;
+		put_unaligned_le16(status & 0x0000ffff, req->buf);
+		break;
+	/*
+	 * Function drivers should handle SetFeature/ClearFeature
+	 * (FUNCTION_SUSPEND) request. function_suspend cb should be supplied
+	 * only for the first interface of the function
+	 */
+	case USB_REQ_CLEAR_FEATURE:
+	case USB_REQ_SET_FEATURE:
+		if (!gadget_is_superspeed(gadget))
+			goto unknown;
+		if (ctrl->bRequestType != (USB_DIR_OUT | USB_RECIP_INTERFACE))
+			goto unknown;
+		switch (w_value) {
+		case USB_INTRF_FUNC_SUSPEND:
+			if (!cdev->config || intf >= MAX_CONFIG_INTERFACES)
+				break;
+			f = cdev->config->interface[intf];
+			if (!f)
+				break;
+			value = 0;
+			if (f->func_suspend)
+				value = f->func_suspend(f, w_index >> 8);
+			if (value < 0) {
+				ERROR(cdev,
+				      "func_suspend() returned error %d\n",
+				      value);
+				value = 0;
+			}
+			break;
+		}
 		break;
 	default:
 unknown:
@@ -1119,7 +1316,6 @@ static void composite_disconnect(struct usb_gadget *gadget)
 	/* REVISIT:  should we have config and device level
 	 * disconnect callbacks?
 	 */
-	printk(KERN_DEBUG "usb: %s\n", __func__);
 	spin_lock_irqsave(&cdev->lock, flags);
 	if (cdev->config)
 		reset_config(cdev);
@@ -1237,7 +1433,6 @@ static int composite_bind(struct usb_gadget *gadget)
 		goto fail;
 
 	cdev->desc = *composite->dev;
-	cdev->desc.bMaxPacketSize0 = gadget->ep0->maxpacket;
 
 	/* standardized runtime overrides for device ID data */
 	if (idVendor)
@@ -1351,7 +1546,11 @@ composite_resume(struct usb_gadget *gadget)
 /*-------------------------------------------------------------------------*/
 
 static struct usb_gadget_driver composite_driver = {
+#ifdef CONFIG_USB_GADGET_SUPERSPEED
+	.speed		= USB_SPEED_SUPER,
+#else
 	.speed		= USB_SPEED_HIGH,
+#endif
 
 	.unbind		= composite_unbind,
 

@@ -91,6 +91,7 @@ obj-$(CONFIG_SENSORS_MAX6639)	+= max6639.o
 obj-$(CONFIG_SENSORS_MAX6642)	+= max6642.o
 obj-$(CONFIG_SENSORS_MAX6650)	+= max6650.o
 obj-$(CONFIG_SENSORS_MC13783_ADC)+= mc13783-adc.o
+obj-$(CONFIG_SENSORS_NTC_THERMISTOR)	+= ntc_thermistor.o
 obj-$(CONFIG_SENSORS_PC87360)	+= pc87360.o
 obj-$(CONFIG_SENSORS_PC87427)	+= pc87427.o
 obj-$(CONFIG_SENSORS_PCF8591)	+= pcf8591.o
@@ -118,9 +119,6 @@ obj-$(CONFIG_SENSORS_W83L785TS)	+= w83l785ts.o
 obj-$(CONFIG_SENSORS_W83L786NG)	+= w83l786ng.o
 obj-$(CONFIG_SENSORS_WM831X)	+= wm831x-hwmon.o
 obj-$(CONFIG_SENSORS_WM8350)	+= wm8350-hwmon.o
-obj-$(CONFIG_SENSORS_WPCE775X)	+= wpce775x.o
-obj-$(CONFIG_SENSORS_MSM_ADC)	+= msm_adc.o m_adcproc.o
-obj-$(CONFIG_SENSORS_PM8XXX_ADC)	+= pm8xxx-adc.o pm8xxx-adc-scale.o
 
 # PMBus drivers
 obj-$(CONFIG_PMBUS)		+= pmbus_core.o

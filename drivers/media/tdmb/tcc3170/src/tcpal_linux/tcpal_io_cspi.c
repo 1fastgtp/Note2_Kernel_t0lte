@@ -244,9 +244,9 @@ static inline s32 tcpal_cspi_single_io(
 	buffer[2] = (_reg_addr & 0x03f) << 2 | 0x0;
 
 	if (_write_flag)
-		buffer[3] = _data[0];	 /* write */
+		buffer[3] = _data[0]; /* write */
 	else
-		buffer[3] = 0x0;		  /* null(8) */
+		buffer[3] = 0x0; /* null(8) */
 
 	buffer[4] = 0x00;
 
@@ -260,7 +260,7 @@ static inline s32 tcpal_cspi_single_io(
 	if (ret < 0)
 		return ret;
 
-	if (buffout[7] != SPICMD_ACK) {				 /* ack */
+	if (buffout[7] != SPICMD_ACK) { /* ack */
 		tcbd_debug(DEBUG_ERROR,
 			"# Single %s ACK error chip_addr:0x%X, regAddr:0x%X\n",
 			_write_flag ? "Write" : "Read",

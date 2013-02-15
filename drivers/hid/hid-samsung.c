@@ -147,12 +147,8 @@ static int samsung_kbd_input_mapping(struct hid_device *hdev,
 		set_bit(EV_REP, hi->input->evbit);
 		/* Only for UK keyboard */
 		/* key found */
-		case 0x32:
-			samsung_kbd_mouse_map_key_clear(KEY_KBDILLUMTOGGLE);
-			break;
-		case 0x64:
-			samsung_kbd_mouse_map_key_clear(KEY_BACKSLASH);
-			break;
+		case 0x32: samsung_kbd_mouse_map_key_clear(KEY_KBDILLUMTOGGLE); break;
+		case 0x64: samsung_kbd_mouse_map_key_clear(KEY_BACKSLASH); break;
 		default:
 			return 0;
 		}
@@ -162,54 +158,26 @@ static int samsung_kbd_input_mapping(struct hid_device *hdev,
 		switch (usage->hid & HID_USAGE) {
 		/* report 2 */
 		/* MENU */
-		case 0x040:
-			samsung_kbd_mouse_map_key_clear(KEY_MENU);
-			break;
-		case 0x18a:
-			samsung_kbd_mouse_map_key_clear(KEY_MAIL);
-			break;
-		case 0x196:
-			samsung_kbd_mouse_map_key_clear(KEY_WWW);
-			break;
-		case 0x19e:
-			samsung_kbd_mouse_map_key_clear(KEY_SCREENLOCK);
-			break;
-		case 0x221:
-			samsung_kbd_mouse_map_key_clear(KEY_SEARCH);
-			break;
-		case 0x223:
-			samsung_kbd_mouse_map_key_clear(KEY_HOMEPAGE);
-			break;
+		case 0x040: samsung_kbd_mouse_map_key_clear(KEY_MENU); break;
+		case 0x18a: samsung_kbd_mouse_map_key_clear(KEY_MAIL); break;
+		case 0x196: samsung_kbd_mouse_map_key_clear(KEY_WWW); break;
+		case 0x19e: samsung_kbd_mouse_map_key_clear(KEY_SCREENLOCK); break;
+		case 0x221: samsung_kbd_mouse_map_key_clear(KEY_SEARCH); break;
+		case 0x223: samsung_kbd_mouse_map_key_clear(KEY_HOMEPAGE); break;
 		/* RECENTAPPS */
-		case 0x301:
-			samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY1);
-			break;
+		case 0x301: samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY1); break;
 		/* APPLICATION */
-		case 0x302:
-			samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY2);
-			break;
+		case 0x302: samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY2); break;
 		/* Voice search */
-		case 0x305:
-			samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY4);
-			break;
+		case 0x305: samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY4); break;
 		/* QPANEL on/off */
-		case 0x306:
-			samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY5);
-			break;
+		case 0x306: samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY5); break;
 		/* SIP on/off */
-		case 0x307:
-			samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY3);
-			break;
+		case 0x307: samsung_kbd_mouse_map_key_clear(BTN_TRIGGER_HAPPY3); break;
 		/* LANG */
-		case 0x308:
-			samsung_kbd_mouse_map_key_clear(KEY_LANGUAGE);
-			break;
-		case 0x30a:
-			samsung_kbd_mouse_map_key_clear(KEY_BRIGHTNESSDOWN);
-			break;
-		case 0x30b:
-			samsung_kbd_mouse_map_key_clear(KEY_BRIGHTNESSUP);
-			break;
+		case 0x308: samsung_kbd_mouse_map_key_clear(KEY_LANGUAGE); break;
+		case 0x30a: samsung_kbd_mouse_map_key_clear(KEY_BRIGHTNESSDOWN); break;
+		case 0x30b: samsung_kbd_mouse_map_key_clear(KEY_BRIGHTNESSUP); break;
 		default:
 			return 0;
 		}
@@ -276,8 +244,7 @@ err_free:
 static const struct hid_device_id samsung_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SAMSUNG, USB_DEVICE_ID_SAMSUNG_IR_REMOTE) },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SAMSUNG, USB_DEVICE_ID_SAMSUNG_WIRELESS_KBD_MOUSE) },
-	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_SAMSUNG_ELECTRONICS,
-		USB_DEVICE_ID_SAMSUNG_WIRELESS_KBD) },
+	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_SAMSUNG_ELECTRONICS, USB_DEVICE_ID_SAMSUNG_WIRELESS_KBD) },
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, samsung_devices);

@@ -29,7 +29,7 @@ MODULE_LICENSE("GPL");
 #define BTLOCK_NAME      "btlock"
 #define BTLOCK_MINOR     224
 
-#define PR(msg, ...) printk(KERN_DEBUG "#### %s " msg, current->comm, ##__VA_ARGS__)
+#define PR(msg, ...) printk("#### %s " msg, current->comm, ##__VA_ARGS__)
 
 struct btlock {
 	int lock;
@@ -59,9 +59,9 @@ static ssize_t btlock_write(struct file *file, const char __user *buffer, size_t
 	if (count < sizeof(struct btlock))
 		return -EINVAL;
 
-	if (copy_from_user(&lock_para, buffer, sizeof(struct btlock)))
+	if (copy_from_user(&lock_para, buffer, sizeof(struct btlock))) {
 		return -EFAULT;
-
+	}
 	memcpy(cookie_msg, &lock_para.cookie, sizeof(lock_para.cookie));
 	if (lock_para.lock == 0) {
 		if (owner_cookie == lock_para.cookie) {
@@ -70,13 +70,17 @@ static ssize_t btlock_write(struct file *file, const char __user *buffer, size_t
 			PR("lock released, cookie: %s\n", cookie_msg);
 		} else
 			memcpy(owner_msg, &owner_cookie, sizeof(owner_cookie));
-			PR("release, cookie_mismatch:%s, owner:%s\n", cookie_msg,
+PR("release, cookie_mismatch:%s, owner:%s\n", cookie_msg,
 				owner_cookie == 0 ? "NULL" : owner_msg);
 	} else if (lock_para.lock == 1) {
+		#if 1
 		if (down_killable(&lock)) {
 			PR("killed\n");
 			return -ERESTARTSYS;
 		}
+		#else
+		down(&lock);
+		#endif
 		owner_cookie = lock_para.cookie;
 		PR("lock acquired, %s\n", cookie_msg);
 	} else if (lock_para.lock == 2) {

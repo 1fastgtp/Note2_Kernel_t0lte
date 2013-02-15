@@ -269,7 +269,6 @@ obj-$(CONFIG_XTENSA_XT2000_SONIC) += xtsonic.o
 obj-$(CONFIG_DNET) += dnet.o
 obj-$(CONFIG_MACB) += macb.o
 obj-$(CONFIG_S6GMAC) += s6gmac.o
-obj-$(CONFIG_QFEC) += qfec.o
 
 obj-$(CONFIG_ARM) += arm/
 obj-$(CONFIG_DEV_APPLETALK) += appletalk/
@@ -300,16 +299,14 @@ obj-$(CONFIG_NETCONSOLE) += netconsole.o
 obj-$(CONFIG_FS_ENET) += fs_enet/
 
 obj-$(CONFIG_NETXEN_NIC) += netxen/
-
-obj-$(CONFIG_MSM_RMNET) += msm_rmnet.o
-obj-$(CONFIG_MSM_RMNET_SDIO) += msm_rmnet_sdio.o
-obj-$(CONFIG_MSM_RMNET_BAM) += msm_rmnet_bam.o
-
 obj-$(CONFIG_NIU) += niu.o
 obj-$(CONFIG_VIRTIO_NET) += virtio_net.o
 obj-$(CONFIG_SFC) += sfc/
 
 obj-$(CONFIG_WIMAX) += wimax/
+#wimax for gaudi ICS
+obj-$(CONFIG_WIMAX_CMC) += wimax_cmc/
+
 obj-$(CONFIG_CAIF) += caif/
 
 obj-$(CONFIG_OCTEON_MGMT_ETHERNET) += octeon/

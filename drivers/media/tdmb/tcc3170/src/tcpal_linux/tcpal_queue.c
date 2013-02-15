@@ -110,8 +110,8 @@ s32 tcbd_enqueue(
 	else
 		_queue->pointer += _size;
 	memcpy(_queue->q[_queue->rear].buffer, _chunk, _size);
-	_queue->q[_queue->rear].size   = _size;
-	_queue->q[_queue->rear].type   = _type;
+	_queue->q[_queue->rear].size = _size;
+	_queue->q[_queue->rear].type = _type;
 	_queue->q[_queue->rear].subch_id = _subch_id;
 
 	_queue->rear = (_queue->rear + 1) % _queue->qsize;

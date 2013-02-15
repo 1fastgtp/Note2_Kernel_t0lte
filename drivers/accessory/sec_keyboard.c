@@ -1,24 +1,3 @@
-/*
- * keyboard dock driver
- *
- * This driver supports keyboard dock connection with uart
- *
- * COPYRIGHT(C) Samsung Electronics Co., Ltd. 2006-2011 All Right Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- */
 
 #include "sec_keyboard.h"
 
@@ -34,7 +13,7 @@ static void sec_keyboard_power(struct work_struct *work)
 			struct sec_keyboard_drvdata, power_dwork.work);
 
 	if (UNKOWN_KEYLAYOUT == data->kl) {
-		data->acc_power(3, false);
+		data->acc_power(1, false);
 		data->pre_connected = false;
 
 		if (data->check_uart_path)
@@ -78,13 +57,11 @@ static void release_all_keys(struct sec_keyboard_drvdata *data)
 	}
 }
 
-static void sec_keyboard_process_data(struct work_struct *work)
+static void sec_keyboard_process_data(
+	struct sec_keyboard_drvdata *data, u8 scan_code)
 {
-	struct sec_keyboard_drvdata *data = container_of(work,
-			struct sec_keyboard_drvdata, handledata_dwork.work);
 	bool press;
 	unsigned int keycode;
-	unsigned char scan_code = data->scan_code;
 
 	/* keyboard driver need the contry code*/
 	if (data->kl == UNKOWN_KEYLAYOUT) {
@@ -175,8 +152,18 @@ static int check_keyboard_dock(struct sec_keyboard_callbacks *cb, bool val)
 	int try_cnt = 0;
 	int max_cnt = 14;
 
-	if (NULL == data->serio)
-		return 0;
+	if (NULL == data->serio) {
+		for (try_cnt = 0; try_cnt < max_cnt; try_cnt++) {
+			msleep(50);
+			if (data->tx_ready)
+				break;
+
+			if (gpio_get_value(data->acc_int_gpio)) {
+				printk(KERN_DEBUG "[Keyboard] acc is disconnected.\n");
+				return 0;
+			}
+		}
+	}
 
 	if (!val)
 		data->dockconnected = false;
@@ -186,7 +173,7 @@ static int check_keyboard_dock(struct sec_keyboard_callbacks *cb, bool val)
 		if (data->pre_connected) {
 			if (UNKOWN_KEYLAYOUT != data->pre_kl) {
 				data->kl = data->pre_kl;
-				data->acc_power(3, true);
+				data->acc_power(1, true);
 				printk(KERN_DEBUG "[Keyboard] kl : %d\n",
 					data->pre_kl);
 				return 1;
@@ -203,7 +190,7 @@ static int check_keyboard_dock(struct sec_keyboard_callbacks *cb, bool val)
 			data->check_uart_path(true);
 
 		msleep(200);
-		data->acc_power(3, true);
+		data->acc_power(1, true);
 
 		/* try to get handshake data */
 		for (try_cnt = 0; try_cnt < max_cnt; try_cnt++) {
@@ -219,9 +206,9 @@ static int check_keyboard_dock(struct sec_keyboard_callbacks *cb, bool val)
 		}
 	}
 
-	if (data->dockconnected)
+	if (data->dockconnected) {
 		return 1;
-	else	{
+	} else {
 		if (data->pre_connected) {
 			data->dockconnected = false;
 			schedule_delayed_work(&data->power_dwork, HZ/2);
@@ -244,6 +231,9 @@ static int sec_keyboard_event(struct input_dev *dev,
 			sec_keyboard_tx(data, 0xca);
 		else
 			sec_keyboard_tx(data, 0xcb);
+
+	printk(KERN_DEBUG "[Keyboard] %s, capslock on led value=%d\n",\
+		 __func__, value);
 		return 0;
 	}
 	return -1;
@@ -273,9 +263,8 @@ static irqreturn_t sec_keyboard_interrupt(struct serio *serio,
 		unsigned char data, unsigned int flags)
 {
 	struct sec_keyboard_drvdata *ddata = serio_get_drvdata(serio);
-	ddata->scan_code = data;
 	if (ddata->pre_connected)
-		schedule_delayed_work(&ddata->handledata_dwork, 0);
+		sec_keyboard_process_data(ddata, data);
 	return IRQ_HANDLED;
 }
 
@@ -329,7 +318,6 @@ static void keyboard_late_resume(struct early_suspend *early_sus)
 
 }
 #endif
-
 static int __devinit sec_keyboard_probe(struct platform_device *pdev)
 {
 	struct sec_keyboard_platform_data *pdata = pdev->dev.platform_data;
@@ -345,7 +333,7 @@ static int __devinit sec_keyboard_probe(struct platform_device *pdev)
 	ddata = kzalloc(sizeof(struct sec_keyboard_drvdata), GFP_KERNEL);
 	if (NULL == ddata) {
 		error = -ENOMEM;
-		goto err_alloc_mem;
+		goto err_free_mem;
 	}
 
 	input = input_allocate_device();
@@ -372,7 +360,6 @@ static int __devinit sec_keyboard_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&ddata->remap_dwork, sec_keyboard_remapkey);
 	INIT_DELAYED_WORK(&ddata->power_dwork, sec_keyboard_power);
-	INIT_DELAYED_WORK(&ddata->handledata_dwork, sec_keyboard_process_data);
 
 	platform_set_drvdata(pdev, ddata);
 	input_set_drvdata(input, ddata);
@@ -452,14 +439,12 @@ err_sysfs_create_group:
 #endif
 	serio_unregister_driver(&ddata->serio_driver);
 err_reg_serio:
-	input_free_device(input);
 err_input_allocate_device:
+	input_free_device(input);
 	del_timer_sync(&ddata->remap_dwork.timer);
 	del_timer_sync(&ddata->power_dwork.timer);
 err_free_mem:
 	kfree(ddata);
-err_alloc_mem:
-
 	return error;
 
 }

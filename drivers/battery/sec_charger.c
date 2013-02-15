@@ -165,6 +165,7 @@ static void sec_chg_isr_work(struct work_struct *work)
 	}
 }
 
+
 static irqreturn_t sec_chg_irq_thread(int irq, void *irq_data)
 {
 	struct sec_charger_info *charger = irq_data;
@@ -295,7 +296,7 @@ static int __devinit sec_charger_probe(
 		if (ret) {
 			dev_err(&client->dev,
 				"%s: Failed to Reqeust IRQ\n", __func__);
-			goto err_supply_unreg;
+			return ret;
 		}
 
 		if (charger->pdata->full_check_type ==
@@ -315,15 +316,13 @@ static int __devinit sec_charger_probe(
 	if (ret) {
 		dev_err(&client->dev,
 			"%s : Failed to create_attrs\n", __func__);
-		goto err_supply_unreg;
+		goto err_free;
 	}
 
 	dev_dbg(&client->dev,
 		"%s: SEC Charger Driver Loaded\n", __func__);
 	return 0;
 
-err_supply_unreg:
-	power_supply_unregister(&charger->psy_chg);
 err_free:
 	kfree(charger);
 

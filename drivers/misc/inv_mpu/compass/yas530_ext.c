@@ -13,7 +13,6 @@
 #include <linux/mpu.h>
 #include "mlsl.h"
 #include "mldl_cfg.h"
-#include "yas530_ext.h"
 #undef MPL_LOG_TAG
 #define MPL_LOG_TAG "MPL-compass"
 
@@ -22,6 +21,12 @@ struct yas530_ext_private_data {
 	char offsets[3];
 	const int *correction_matrix;
 };
+
+
+extern int geomagnetic_api_read(int *xyz, int *raw, int *xy1y2, int *accuracy);
+extern int geomagnetic_api_resume(void);
+extern int geomagnetic_api_suspend(void);
+
 
 static int yas530_ext_suspend(void *mlsl_handle,
 			  struct ext_slave_descr *slave,
@@ -33,6 +38,7 @@ static int yas530_ext_suspend(void *mlsl_handle,
 
 	return result;
 }
+
 
 static int yas530_ext_resume(void *mlsl_handle,
 			 struct ext_slave_descr *slave,
@@ -73,7 +79,9 @@ static int yas530_ext_read(void *mlsl_handle,
 	data[5] = xyz_scaled[2] & 0xFF;
 	data[6] = (unsigned char)accuracy;
 
+
 	return result;
+
 }
 
 static int yas530_ext_config(void *mlsl_handle,
@@ -84,7 +92,9 @@ static int yas530_ext_config(void *mlsl_handle,
 	int result = INV_SUCCESS;
 	struct yas530_private_data *private_data = pdata->private_data;
 
+
 	return result;
+
 }
 
 
@@ -96,9 +106,10 @@ static int yas530_ext_get_config(void *mlsl_handle,
 	int result = INV_SUCCESS;
 	struct yas530_ext_private_data *private_data = pdata->private_data;
 
-	switch (data->key) {
-	default:
-		return INV_ERROR_FEATURE_NOT_IMPLEMENTED;
+	switch (data->key)
+	{
+		default:
+			return INV_ERROR_FEATURE_NOT_IMPLEMENTED;
 	}
 	return result;
 }
@@ -113,7 +124,7 @@ static int yas530_ext_init(void *mlsl_handle,
 	char offset[3] = {0, 0, 0};
 
 	private_data = (struct yas530_ext_private_data *)
-		kzalloc(sizeof(struct yas530_ext_private_data), GFP_KERNEL);
+			kzalloc(sizeof(struct yas530_ext_private_data), GFP_KERNEL);
 
 	if (!private_data)
 		return INV_ERROR_MEMORY_EXAUSTED;
@@ -271,3 +282,7 @@ MODULE_AUTHOR("Invensense Corporation");
 MODULE_DESCRIPTION("Driver to integrate YAS530 sensor with the MPU");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("yas530_ext_mod");
+
+/**
+ *  @}
+ */

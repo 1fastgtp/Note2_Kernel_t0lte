@@ -27,11 +27,11 @@
 #include "tcbd_diagnosis.h"
 #include "tcbd_error.h"
 
-#define OFFSET_RF_LOOP_GAIN  4
-#define OFFSET_BB_LOOP_GAIN  5
-#define OFFSET_PRS_SNR       8
-#define OFFSET_PCBER         12
-#define OFFSET_RS_PKT_CNT    16
+#define OFFSET_RF_LOOP_GAIN   4
+#define OFFSET_BB_LOOP_GAIN   5
+#define OFFSET_PRS_SNR		8
+#define OFFSET_PCBER		 12
+#define OFFSET_RS_PKT_CNT	16
 #define OFFSET_RS_OVER_CNT   20
 #define OFFSET_RS_ERR_CNT_LO 24
 #define OFFSET_RS_ERR_CNT_HI 28

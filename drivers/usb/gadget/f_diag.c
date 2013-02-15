@@ -20,7 +20,6 @@
 #include <linux/platform_device.h>
 
 #include <mach/usbdiag.h>
-#include <mach/rpc_hsusb.h>
 
 #include <linux/usb/composite.h>
 #include <linux/usb/gadget.h>
@@ -35,7 +34,7 @@ static struct usb_interface_descriptor intf_desc = {
 	.bDescriptorType    =	USB_DT_INTERFACE,
 	.bNumEndpoints      =	2,
 	.bInterfaceClass    =	0xFF,
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+#if defined(CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE) || defined(CONFIG_SLP)
 	.bInterfaceSubClass =	0x10,
 	.bInterfaceProtocol =	0x01,
 #else
@@ -128,6 +127,8 @@ struct diag_context {
 	unsigned long dpkts_tolaptop;
 	unsigned long dpkts_tomodem;
 	unsigned dpkts_tolaptop_pending;
+	// zero_pky.patch by jagadish
+	bool qxdm_ops;
 };
 
 static inline struct diag_context *func_to_diag(struct usb_function *f)
@@ -144,30 +145,11 @@ static void usb_config_work_func(struct work_struct *work)
 	struct usb_string *s;
 
 	if (ctxt->ch.notify)
+	{
 		ctxt->ch.notify(ctxt->ch.priv, USB_DIAG_CONNECT, NULL);
-
-	if (!ctxt->update_pid_and_serial_num)
-		return;
-
-	/* pass on product id and serial number to dload */
-	if (!cdev->desc.iSerialNumber) {
-		ctxt->update_pid_and_serial_num(
-					cdev->desc.idProduct, 0);
-		return;
+		// zero_pky.patch by jagadish
+		ctxt->qxdm_ops = 0;
 	}
-
-	/*
-	 * Serial number is filled by the composite driver. So
-	 * it is fair enough to assume that it will always be
-	 * found at first table of strings.
-	 */
-	table = *(cdev->driver->strings);
-	for (s = table->strings; s && s->s; s++)
-		if (s->id == cdev->desc.iSerialNumber) {
-			ctxt->update_pid_and_serial_num(
-					cdev->desc.idProduct, s->s);
-			break;
-		}
 }
 
 static void diag_write_complete(struct usb_ep *ep,
@@ -200,8 +182,12 @@ static void diag_write_complete(struct usb_ep *ep,
 	}
 	spin_unlock_irqrestore(&ctxt->lock, flags);
 
-	if (ctxt->ch.notify)
+	if (ctxt->ch.notify) {
+		// zero_pky.patch by jagadish
+		ctxt->qxdm_ops = 1;
 		ctxt->ch.notify(ctxt->ch.priv, USB_DIAG_WRITE_DONE, d_req);
+	}
+
 }
 
 static void diag_read_complete(struct usb_ep *ep,
@@ -220,8 +206,12 @@ static void diag_read_complete(struct usb_ep *ep,
 
 	ctxt->dpkts_tomodem++;
 
-	if (ctxt->ch.notify)
+	if (ctxt->ch.notify) {
+		// zero_pky.patch by jagadish
+		ctxt->qxdm_ops = 1;
 		ctxt->ch.notify(ctxt->ch.priv, USB_DIAG_READ_DONE, d_req);
+	}
+
 }
 
 /**
@@ -500,8 +490,15 @@ static void diag_function_disable(struct usb_function *f)
 	dev->configured = 0;
 	spin_unlock_irqrestore(&dev->lock, flags);
 
-	if (dev->ch.notify)
-		dev->ch.notify(dev->ch.priv, USB_DIAG_DISCONNECT, NULL);
+	// zero_pky.patch by jagadish
+	if (dev->ch.notify) {
+		if (dev->qxdm_ops)
+			dev->ch.notify(dev->ch.priv, USB_DIAG_QXDM_DISCONNECT, NULL);
+		else
+			dev->ch.notify(dev->ch.priv, USB_DIAG_DISCONNECT, NULL);
+		dev->qxdm_ops = 0;
+	}
+
 
 	usb_ep_disable(dev->in);
 	dev->in->driver_data = NULL;
@@ -627,7 +624,8 @@ int diag_function_add(struct usb_configuration *c, const char *name,
 		}
 	}
 	if (!found) {
-		ERROR(c->cdev, "unable to get diag usb channel\n");
+		ERROR(c->cdev, "usb: unable to get diag usb channel\n");
+
 		return -ENODEV;
 	}
 
@@ -635,7 +633,7 @@ int diag_function_add(struct usb_configuration *c, const char *name,
 	/* claim the channel for this USB interface */
 	_ch->priv_usb = dev;
 
-	dev->update_pid_and_serial_num = update_pid; 
+	dev->update_pid_and_serial_num = update_pid;
 	dev->cdev = c->cdev;
 	dev->function.name = _ch->name;
 	dev->function.descriptors = fs_diag_desc;

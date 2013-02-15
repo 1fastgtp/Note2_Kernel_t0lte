@@ -28,14 +28,6 @@ config HWMON_VID
 	tristate
 	default n
 
-config SENSORS_WPCE775X
-	bool "Winbond WPCE775X"
-	depends on I2C
-	default n
-	help
-	  This driver provides support for the Winbond WPCE775XX Embedded
-	  Controller, which provides lcd backlight, LEDs, and Battery control.
-
 config HWMON_DEBUG_CHIP
 	bool "Hardware Monitoring Chip debugging messages"
 	default n
@@ -776,27 +768,19 @@ config SENSORS_MAX6650
 	  This driver can also be built as a module.  If so, the module
 	  will be called max6650.
 
-config SENSORS_MSM_ADC
-	tristate "MSM ADC Driver for current measurement"
-	depends on ARCH_MSM7X30 || ARCH_MSM8X60 || ARCH_FSM9XXX
-	default n
+config SENSORS_NTC_THERMISTOR
+	tristate "NTC thermistor support"
+	depends on EXPERIMENTAL
 	help
-	  Provides interface for measuring the ADC's on AMUX channels of XOADC,
-	  MPP's and the XOTHERM on pmic8058 for msm8x60 and provides post processing
-	  of the channel for the ADC Raw Data. For reading LTC and EPM ADC channels
-	  say yes here to include support for measuring current in real-time
-	  from various power-rails on the Fluid board.  The ADC circuit
-	  internally uses an array of LTC2499 and EPM ADCs in a differential
-	  configuration to provide a flat set of channels that can be addressed.
+	  This driver supports NTC thermistors sensor reading and its
+	  interpretation. The driver can also monitor the temperature and
+	  send notifications about the temperature.
 
-config SENSORS_PM8XXX_ADC
-	tristate "Support for Qualcomm PM8XXX ADC"
-	depends on MFD_PM8XXX
-	help
-	  This is the ADC arbiter driver for Qualcomm PM8XXX Chip.
+	  Currently, this driver supports
+	  NCP15WB473, NCP18WB473, NCP21WB473, NCP03WB473, and NCP15WL333.
 
-	  The driver supports reading the HKADC, XOADC and support to set and receive
-	  temperature threshold notifications using the Battery temperature module.
+	  This driver can also be built as a module.  If so, the module
+	  will be called ntc-thermistor.
 
 config SENSORS_PC87360
 	tristate "National Semiconductor PC87360 family"

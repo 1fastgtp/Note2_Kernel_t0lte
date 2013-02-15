@@ -52,7 +52,7 @@
 #include <linux/slab.h>
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 #include <linux/kthread.h>
 #endif
 
@@ -2391,9 +2391,8 @@ static int sd_revalidate_disk(struct gendisk *disk)
 	 * react badly if we do.
 	 */
 	if (sdkp->media_present) {
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 		disk->media_present = 1;
-		sd_printk(KERN_INFO, sdkp, "%s\n", __func__);
 #endif
 		sd_read_capacity(sdkp, buffer);
 
@@ -2495,7 +2494,7 @@ static int sd_format_disk_name(char *prefix, int index, char *buf, int buflen)
 	return 0;
 }
 
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 static void sd_media_state_emit(struct scsi_disk *sdkp)
 {
 	struct gendisk *gd = sdkp->disk;
@@ -2535,8 +2534,7 @@ static void sd_scanpartition_async(void *data, async_cookie_t cookie)
 	bdev->bd_invalidated = 1;
 	err = blkdev_get(bdev, FMODE_READ, NULL);
 	if (err < 0) {
-		sd_printk(KERN_NOTICE, sdkp,
-			"maybe no media, delete partition\n");
+		sd_printk(KERN_NOTICE, sdkp, "no media, delete partition\n");
 		disk_part_iter_init(&piter, gd, DISK_PITER_INCL_EMPTY);
 		while ((part = disk_part_iter_next(&piter)))
 			delete_partition(gd, part->partno);
@@ -2576,7 +2574,6 @@ static int sd_media_scan_thread(void *__sdkp)
 			(sdkp->thread_remove && sdkp->async_end), 3*HZ);
 		if (sdkp->thread_remove && sdkp->async_end)
 			break;
-
 		ret = sd_check_events(sdkp->disk, 0);
 
 		if (sdkp->prv_media_present
@@ -2641,14 +2638,14 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 		gd->flags |= GENHD_FL_REMOVABLE;
 		gd->events |= DISK_EVENT_MEDIA_CHANGE;
 	}
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 	if (sdp->host->by_usb)
 		gd->interfaces = GENHD_IF_USB;
 	msleep(500);
 #endif
 
 	add_disk(gd);
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 	sdkp->prv_media_present = sdkp->media_present;
 #endif
 	sd_dif_config_host(sdkp);
@@ -2659,7 +2656,7 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 		  sdp->removable ? "removable " : "");
 	scsi_autopm_put_device(sdp);
 	put_device(&sdkp->dev);
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 	if (sdp->host->by_usb) {
 		if (!IS_ERR(sdkp->th))
 			wake_up_process(sdkp->th);
@@ -2756,16 +2753,15 @@ static int sd_probe(struct device *dev)
 	get_device(dev);
 	dev_set_drvdata(dev, sdkp);
 
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 	if (sdp->host->by_usb) {
 		init_waitqueue_head(&sdkp->delay_wait);
 		init_completion(&sdkp->scanning_done);
 		sdkp->thread_remove = 0;
 		sdkp->th = kthread_create(sd_media_scan_thread,
-						sdkp, "sd-media-scan");
+				sdkp, "sd-media-scan");
 		if (IS_ERR(sdkp->th)) {
-			dev_warn(dev,
-			"Unable to start the device-scanning thread\n");
+			pr_err("Unable to start the device-scanning thread\n");
 			complete(&sdkp->scanning_done);
 		}
 	}
@@ -2804,10 +2800,10 @@ static int sd_remove(struct device *dev)
 	struct scsi_disk *sdkp;
 
 	sdkp = dev_get_drvdata(dev);
+	scsi_autopm_get_device(sdkp->device);
 
-#ifdef CONFIG_USB_STORAGE_DETECT
+#ifdef CONFIG_USB_HOST_NOTIFY
 	sdkp->disk->media_present = 0;
-	sd_printk(KERN_INFO, sdkp, "%s\n", __func__);
 	if (sdkp->device->host->by_usb) {
 		sdkp->thread_remove = 1;
 		wake_up_interruptible(&sdkp->delay_wait);
@@ -2815,8 +2811,6 @@ static int sd_remove(struct device *dev)
 		sd_printk(KERN_NOTICE, sdkp, "scan thread kill success\n");
 	}
 #endif
-
-	scsi_autopm_get_device(sdkp->device);
 
 	async_synchronize_full();
 	blk_queue_prep_rq(sdkp->device->request_queue, scsi_prep_fn);
@@ -2975,10 +2969,6 @@ static int __init init_sd(void)
 	if (err)
 		goto err_out;
 
-	err = scsi_register_driver(&sd_template.gendrv);
-	if (err)
-		goto err_out_class;
-
 	sd_cdb_cache = kmem_cache_create("sd_ext_cdb", SD_EXT_CDB_SIZE,
 					 0, 0, NULL);
 	if (!sd_cdb_cache) {
@@ -2992,7 +2982,14 @@ static int __init init_sd(void)
 		goto err_out_cache;
 	}
 
+	err = scsi_register_driver(&sd_template.gendrv);
+	if (err)
+		goto err_out_driver;
+
 	return 0;
+
+err_out_driver:
+	mempool_destroy(sd_cdb_pool);
 
 err_out_cache:
 	kmem_cache_destroy(sd_cdb_cache);
@@ -3016,10 +3013,10 @@ static void __exit exit_sd(void)
 
 	SCSI_LOG_HLQUEUE(3, printk("exit_sd: exiting sd driver\n"));
 
+	scsi_unregister_driver(&sd_template.gendrv);
 	mempool_destroy(sd_cdb_pool);
 	kmem_cache_destroy(sd_cdb_cache);
 
-	scsi_unregister_driver(&sd_template.gendrv);
 	class_unregister(&sd_disk_class);
 
 	for (i = 0; i < SD_MAJORS; i++)

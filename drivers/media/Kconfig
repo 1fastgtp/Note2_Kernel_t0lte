@@ -120,10 +120,7 @@ source "drivers/media/dvb/Kconfig"
 
 source "drivers/media/tdmb/Kconfig"
 
-#
-# Oneseg Drivers
-#
-
-source "drivers/media/nmi326/Kconfig"
+# ISDBT
+source "drivers/media/isdbt/Kconfig"
 
 endif # MEDIA_SUPPORT

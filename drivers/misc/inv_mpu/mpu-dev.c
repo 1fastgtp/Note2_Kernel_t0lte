@@ -43,7 +43,6 @@
 #include <linux/wait.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
-#include <linux/hrtimer.h>
 
 #include "mpuirq.h"
 #include "slaveirq.h"
@@ -54,12 +53,11 @@
 #include "accel/mpu6050.h"
 #include "mpu-dev.h"
 
+
 #ifdef CONFIG_INPUT_YAS_MAGNETOMETER
 #include "compass/yas530_ext.h"
 #endif
-#ifdef CONFIG_SENSORS_AK8975
-#include "compass/ak89753.h"
-#endif
+
 #include <linux/akm8975.h>
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -73,10 +71,13 @@
 
 #define MPU_EARLY_SUSPEND_IN_DRIVER 1
 
+
 #define CALIBRATION_FILE_PATH	"/efs/calibration_data"
 #define CALIBRATION_DATA_AMOUNT	100
 
 struct acc_data cal_data = {0, 0, 0};
+
+
 
 /* Platform data for the MPU */
 struct mpu_private_data {
@@ -84,7 +85,7 @@ struct mpu_private_data {
 	struct i2c_client *client;
 
 	/* mldl_cfg data */
-	struct mldl_cfg mldl_cfg;
+	struct mldl_cfg		mldl_cfg;
 	struct mpu_ram		mpu_ram;
 	struct mpu_gyro_cfg	mpu_gyro_cfg;
 	struct mpu_offsets	mpu_offsets;
@@ -92,25 +93,21 @@ struct mpu_private_data {
 	struct inv_mpu_cfg	inv_mpu_cfg;
 	struct inv_mpu_state	inv_mpu_state;
 
-	struct mutex mutex;
-	wait_queue_head_t mpu_event_wait;
-	struct completion completion;
-	struct timer_list timeout;
-	struct notifier_block nb;
-	struct mpuirq_data mpu_pm_event;
-	int response_timeout;	/* In seconds */
-	unsigned long event;
-	int pid;
+	struct mutex		mutex;
+	wait_queue_head_t	mpu_event_wait;
+	struct completion	completion;
+	struct timer_list	timeout;
+	struct notifier_block	nb;
+	struct mpuirq_data	mpu_pm_event;
+	int			response_timeout;
+	unsigned long		event;
+	int			pid;
 	struct module *slave_modules[EXT_SLAVE_NUM_TYPES];
 	struct {
 		atomic_t enable;
 		unsigned char is_activated;
 		unsigned char turned_by_mpu_accel;
 	} mpu_accel;
-
-	struct hrtimer activate_timer;
-	int activate_timeout;
-
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
@@ -120,9 +117,11 @@ static struct i2c_client *this_client;
 
 #define IDEAL_X 0
 #define IDEAL_Y 0
-#define IDEAL_Z 1024
+#define IDEAL_Z -1024
+/*#define CAL_DIV 8*/
+static int CAL_DIV = 8;
 
-struct mpu_private_data *mpu_private_data;
+struct mpu_private_data *mpu_data;
 
 void mpu_accel_enable_set(int enable)
 {
@@ -145,30 +144,33 @@ void mpu_accel_enable_set(int enable)
 	slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE] = client->adapter;
 
 	if (enable) {
-		mpu->mpu_accel.is_activated = !(mldl_cfg->inv_mpu_state->status
+		mpu->mpu_accel.is_activated =
+			!(mldl_cfg->inv_mpu_state->status
 			& MPU_ACCEL_IS_SUSPENDED);
 
 			(void)inv_mpu_resume(mldl_cfg,
-					slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
-					slave_adapter[EXT_SLAVE_TYPE_ACCEL],
-					slave_adapter[EXT_SLAVE_TYPE_COMPASS],
-					slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
-					INV_THREE_AXIS_ACCEL);
-
-			mpu->mpu_accel.turned_by_mpu_accel
-				= 1;
-	} else {
-		if (!mpu->mpu_accel.is_activated &&
-			mpu->mpu_accel.turned_by_mpu_accel) {
-				(void)inv_mpu_suspend(mldl_cfg,
 				slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
 				slave_adapter[EXT_SLAVE_TYPE_ACCEL],
 				slave_adapter[EXT_SLAVE_TYPE_COMPASS],
 				slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
-					INV_THREE_AXIS_ACCEL);
-				mpu->mpu_accel.turned_by_mpu_accel = 0;
-				}
+				INV_THREE_AXIS_ACCEL);
+
+			mpu->mpu_accel.turned_by_mpu_accel = 1;
+	} else {
+		if (!mpu->mpu_accel.is_activated
+			&& mpu->mpu_accel.turned_by_mpu_accel) {
+
+			(void)inv_mpu_suspend(mldl_cfg,
+				slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
+				slave_adapter[EXT_SLAVE_TYPE_ACCEL],
+				slave_adapter[EXT_SLAVE_TYPE_COMPASS],
+				slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
+				INV_THREE_AXIS_ACCEL);
+
+			mpu->mpu_accel.turned_by_mpu_accel = 0;
 		}
+	}
+
 	atomic_set(&mpu->mpu_accel.enable, enable);
 }
 
@@ -184,7 +186,6 @@ int read_accel_raw_xyz(struct acc_data *acc)
 
 	struct i2c_adapter *slave_adapter[EXT_SLAVE_NUM_TYPES];
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
-	int cal_div = (mldl_cfg->mpu_chip_info->accel_sens_trim) / 1024;
 	int ii;
 
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
@@ -198,16 +199,24 @@ int read_accel_raw_xyz(struct acc_data *acc)
 
 
 	retval = inv_serial_read(slave_adapter[EXT_SLAVE_TYPE_ACCEL],
-		0x68, 0x3B, 6, data);
+			0x68, 0x3B, 6, data);
 
-	x = (s16)((data[0] << 8) | data[1]) / cal_div;
-	y = (s16)((data[2] << 8) | data[3]) / cal_div;
-	z = (s16)((data[4] << 8) | data[5]) / cal_div;
+	if (mldl_cfg->mpu_chip_info->accel_sens_trim == 16384)
+		CAL_DIV = 16;
+	x = (s16)((data[0] << 8) | data[1])/CAL_DIV;
+	y = (s16)((data[2] << 8) | data[3])/CAL_DIV;
+	z = (s16)((data[4] << 8) | data[5])/CAL_DIV;
 
 	acc->x = x;
+
 	acc->y = y;
+
 	acc->z = z;
 
+	/*
+	pr_info("read_accel_raw_xyz acc x: %d y: %d z: %d",
+			acc->x,acc->y,acc->z);
+	*/
 	return 0;
 }
 
@@ -222,7 +231,7 @@ static int accel_open_calibration(void)
 
 	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY, 0666);
 	if (IS_ERR(cal_filp)) {
-		pr_err("%s: Can't open calibration file\n", __func__);
+		pr_err("%s: Can't open calibration file", __func__);
 		set_fs(old_fs);
 		err = PTR_ERR(cal_filp);
 		return err;
@@ -231,11 +240,11 @@ static int accel_open_calibration(void)
 	err = cal_filp->f_op->read(cal_filp,
 		(char *)&cal_data, 3 * sizeof(s16), &cal_filp->f_pos);
 	if (err != 3 * sizeof(s16)) {
-		pr_err("%s: Can't read the cal data from file\n", __func__);
+		pr_err("%s: Can't read the cal data from file", __func__);
 		err = -EIO;
 	}
 
-	printk(KERN_INFO"%s: (%u,%u,%u)\n", __func__,
+	pr_info("%s: (%u,%u,%u)", __func__,
 		cal_data.x, cal_data.y, cal_data.z);
 
 	filp_close(cal_filp, current->files);
@@ -246,29 +255,27 @@ static int accel_open_calibration(void)
 
 static int accel_do_calibrate(int enable)
 {
-	struct mpu_private_data *mpu =
-	    (struct mpu_private_data *) i2c_get_clientdata(this_client);
-	struct mldl_cfg *mldl_cfg = &mpu->mldl_cfg;
 	struct acc_data data = { 0, };
 	struct file *cal_filp = NULL;
+	struct mpu_private_data *mpu =
+	    (struct mpu_private_data *) i2c_get_clientdata(this_client);
+	/* struct i2c_client *client = mpu->client; */
+	struct mldl_cfg *mldl_cfg = &mpu->mldl_cfg;
 
 	int sum[3] = { 0, };
 	int err = 0;
 	int i;
 	mm_segment_t old_fs;
 
-	int cal_div = (mldl_cfg->mpu_chip_info->accel_sens_trim) / 1024;
-	int ideal_z = IDEAL_Z * mldl_cfg->pdata->orientation[8];
-
-	/*mutex_lock(&mpu->mutex);*/
+	/* mutex_lock(&mpu->mutex); */
 	mpu_accel_enable_set(1);
-	mdelay(1);
+	msleep(20);
 
 	for (i = 0; i < CALIBRATION_DATA_AMOUNT; i++) {
 		err = read_accel_raw_xyz(&data);
 		if (err < 0) {
 			pr_err("%s: accel_read_accel_raw_xyz() "
-				"failed in the %dth loop\n", __func__, i);
+				"failed in the %dth loop", __func__, i);
 			return err;
 		}
 
@@ -278,23 +285,26 @@ static int accel_do_calibrate(int enable)
 	}
 
 	mpu_accel_enable_set(0);
-	mdelay(1);
-	/*mutex_unlock(&mpu->mutex);*/
+	msleep(20);
+	/* mutex_unlock(&mpu->mutex); */
+
+	if (mldl_cfg->mpu_chip_info->accel_sens_trim == 16384)
+		CAL_DIV = 16;
 
 	if (enable) {
-		cal_data.x = ((sum[0] / CALIBRATION_DATA_AMOUNT) - IDEAL_X)
-			* cal_div;
-		cal_data.y = ((sum[1] / CALIBRATION_DATA_AMOUNT) - IDEAL_Y)
-			* cal_div;
-		cal_data.z = ((sum[2] / CALIBRATION_DATA_AMOUNT) - ideal_z)
-			* cal_div;
+		cal_data.x = ((sum[0] / CALIBRATION_DATA_AMOUNT)
+				- IDEAL_X)*CAL_DIV;
+		cal_data.y = ((sum[1] / CALIBRATION_DATA_AMOUNT)
+				- IDEAL_Y)*CAL_DIV;
+		cal_data.z = ((sum[2] / CALIBRATION_DATA_AMOUNT)
+				- IDEAL_Z)*CAL_DIV;
 	} else {
 		cal_data.x = 0;
 		cal_data.y = 0;
 		cal_data.z = 0;
 	}
 
-	printk(KERN_INFO "%s: cal data (%d,%d,%d)\n", __func__,
+	pr_info("%s: cal data (%d,%d,%d)", __func__,
 			cal_data.x, cal_data.y, cal_data.z);
 
 	old_fs = get_fs();
@@ -303,7 +313,7 @@ static int accel_do_calibrate(int enable)
 	cal_filp = filp_open(CALIBRATION_FILE_PATH,
 			O_CREAT | O_TRUNC | O_WRONLY, 0666);
 	if (IS_ERR(cal_filp)) {
-		pr_err("%s: Can't open calibration file\n", __func__);
+		pr_err("%s: Can't open calibration file", __func__);
 		set_fs(old_fs);
 		err = PTR_ERR(cal_filp);
 		return err;
@@ -312,7 +322,7 @@ static int accel_do_calibrate(int enable)
 	err = cal_filp->f_op->write(cal_filp,
 		(char *)&cal_data, 3 * sizeof(s16), &cal_filp->f_pos);
 	if (err != 3 * sizeof(s16)) {
-		pr_err("%s: Can't write the cal data to file\n", __func__);
+		pr_err("%s: Can't write the cal data to file", __func__);
 		err = -EIO;
 	}
 
@@ -326,21 +336,22 @@ static void mpu_pm_timeout(u_long data)
 {
 	struct mpu_private_data *mpu = (struct mpu_private_data *)data;
 	struct i2c_client *client = mpu->client;
-	dev_dbg(&client->adapter->dev, "%s\n", __func__);
+	dev_dbg(&client->adapter->dev, "%s", __func__);
 	complete(&mpu->completion);
 }
-
-
-static int mpu_early_notifier_callback(struct mpu_private_data *mpu,
+#if 0
+static int mpu_pm_notifier_callback(struct notifier_block *nb,
 				    unsigned long event, void *unused)
 {
+	struct mpu_private_data *mpu =
+	    container_of(nb, struct mpu_private_data, nb);
 	struct i2c_client *client = mpu->client;
 	struct timeval event_time;
-	dev_dbg(&client->adapter->dev, "%s: %ld\n", __func__, event);
+	dev_dbg(&client->adapter->dev, "%s: %ld", __func__, event);
 
 	/* Prevent the file handle from being closed before we initialize
 	   the completion event */
-	printk(KERN_INFO"[%s] event = %lu\n", __func__, event);
+	pr_info("[%s] event = %ld", __func__, event);
 	mutex_lock(&mpu->mutex);
 	if (!(mpu->pid) ||
 	    (event != PM_SUSPEND_PREPARE && event != PM_POST_SUSPEND)) {
@@ -349,9 +360,9 @@ static int mpu_early_notifier_callback(struct mpu_private_data *mpu,
 	}
 
 	if (event == PM_SUSPEND_PREPARE)
-		mpu->event |= MPU_PM_EVENT_SUSPEND_PREPARE;
+		mpu->event = MPU_PM_EVENT_SUSPEND_PREPARE;
 	if (event == PM_POST_SUSPEND)
-		mpu->event |= MPU_PM_EVENT_POST_SUSPEND;
+		mpu->event = MPU_PM_EVENT_POST_SUSPEND;
 
 	do_gettimeofday(&event_time);
 	mpu->mpu_pm_event.interruptcount++;
@@ -370,7 +381,54 @@ static int mpu_early_notifier_callback(struct mpu_private_data *mpu,
 	wake_up_interruptible(&mpu->mpu_event_wait);
 	wait_for_completion(&mpu->completion);
 	del_timer_sync(&mpu->timeout);
-	dev_dbg(&client->adapter->dev, "%s: %ld DONE\n", __func__, event);
+	dev_dbg(&client->adapter->dev, "%s: %ld DONE", __func__, event);
+	return NOTIFY_OK;
+}
+#endif
+static int mpu_early_notifier_callback(struct mpu_private_data *mpu,
+				    unsigned long event, void *unused)
+{
+	struct i2c_client *client = mpu->client;
+	struct timeval event_time;
+	dev_dbg(&client->adapter->dev, "%s: %s", __func__,
+		(event == MPU_PM_EVENT_SUSPEND_PREPARE) ?
+		"MPU_PM_EVENT_SUSPEND_PREPARE" : "MPU_PM_EVENT_POST_SUSPEND");
+
+	/* Prevent the file handle from being closed before we initialize
+	   the completion event */
+	pr_info("[%s] event = %ld", __func__, event);
+	mutex_lock(&mpu->mutex);
+	if (!(mpu->pid) ||
+	    (event != PM_SUSPEND_PREPARE && event != PM_POST_SUSPEND)) {
+		mutex_unlock(&mpu->mutex);
+		return NOTIFY_OK;
+	}
+
+	if (event == PM_SUSPEND_PREPARE)
+		mpu->event = MPU_PM_EVENT_SUSPEND_PREPARE;
+	if (event == PM_POST_SUSPEND)
+		mpu->event = MPU_PM_EVENT_POST_SUSPEND;
+
+	do_gettimeofday(&event_time);
+	mpu->mpu_pm_event.interruptcount++;
+	mpu->mpu_pm_event.irqtime =
+	    (((long long)event_time.tv_sec) << 32) + event_time.tv_usec;
+	mpu->mpu_pm_event.data_type = MPUIRQ_DATA_TYPE_PM_EVENT;
+	mpu->mpu_pm_event.data = mpu->event;
+
+	if (mpu->response_timeout > 0) {
+		mpu->timeout.expires = jiffies + mpu->response_timeout * HZ;
+		add_timer(&mpu->timeout);
+	}
+	INIT_COMPLETION(mpu->completion);
+	mutex_unlock(&mpu->mutex);
+
+	wake_up_interruptible(&mpu->mpu_event_wait);
+	wait_for_completion(&mpu->completion);
+	del_timer_sync(&mpu->timeout);
+	dev_dbg(&client->adapter->dev, "%s: %s DONE", __func__,
+		(event == MPU_PM_EVENT_SUSPEND_PREPARE) ?
+		"MPU_PM_EVENT_SUSPEND_PREPARE" : "MPU_PM_EVENT_POST_SUSPEND");
 	return NOTIFY_OK;
 }
 
@@ -381,8 +439,8 @@ static int mpu_dev_open(struct inode *inode, struct file *file)
 	struct i2c_client *client = mpu->client;
 	int result;
 	int ii;
-	dev_dbg(&client->adapter->dev, "%s\n", __func__);
-	dev_dbg(&client->adapter->dev, "current->pid %d\n", current->pid);
+	dev_dbg(&client->adapter->dev, "%s", __func__);
+	dev_dbg(&client->adapter->dev, "current->pid %d", current->pid);
 
 	accel_open_calibration();
 
@@ -396,7 +454,7 @@ static int mpu_dev_open(struct inode *inode, struct file *file)
 	/* Reset the sensors to the default */
 	if (result) {
 		dev_err(&client->adapter->dev,
-			"%s: mutex_lock_interruptible returned %d\n",
+			"%s: mutex_lock_interruptible returned %d",
 			__func__, result);
 		return result;
 	}
@@ -443,7 +501,7 @@ static int mpu_release(struct inode *inode, struct file *file)
 
 	mutex_unlock(&mpu->mutex);
 	complete(&mpu->completion);
-	dev_dbg(&client->adapter->dev, "mpu_release\n");
+	dev_dbg(&client->adapter->dev, "mpu_release");
 
 	return result;
 }
@@ -468,7 +526,7 @@ static ssize_t mpu_read(struct file *file,
 	err = copy_to_user(buf, &mpu->mpu_pm_event, sizeof(mpu->mpu_pm_event));
 	if (err) {
 		dev_err(&client->adapter->dev,
-			"Copy to user returned %d\n", err);
+			"Copy to user returned %d", err);
 		return -EFAULT;
 	}
 	mpu->event = 0;
@@ -794,7 +852,7 @@ static int mpu_handle_mlsl(void *sl_handle,
 	};
 	if (retval) {
 		dev_err(&((struct i2c_adapter *)sl_handle)->dev,
-			"%s: i2c %d error %d\n",
+			"%s: i2c %d error %d",
 			__func__, cmd, retval);
 		kfree(msg.data);
 		return retval;
@@ -803,46 +861,6 @@ static int mpu_handle_mlsl(void *sl_handle,
 			      msg.data, msg.length);
 	kfree(msg.data);
 	return retval;
-}
-
-static enum hrtimer_restart mpu_actiavte_sensors_callback(struct hrtimer *timer)
-{
-	struct mpu_private_data *mpu = mpu_private_data;
-
-	struct i2c_client *client = mpu->client;
-	struct timeval event_time;
-
-	dev_dbg(&client->adapter->dev, "%s\n", __func__);
-
-	/* Prevent the file handle from being closed before we initialize
-	   the completion event */
-
-	mpu->event |= MPU_KN_EVENT_ENABLE_SENSORS;
-
-	do_gettimeofday(&event_time);
-	mpu->mpu_pm_event.interruptcount++;
-	mpu->mpu_pm_event.irqtime =
-	    (((long long)event_time.tv_sec) << 32) + event_time.tv_usec;
-	mpu->mpu_pm_event.data_type =  MPUIRQ_DATA_TYPE_PM_EVENT;
-	mpu->mpu_pm_event.data = mpu->event;
-
-	wake_up_interruptible(&mpu->mpu_event_wait);
-
-	return HRTIMER_NORESTART;
-}
-
-static long mpu_dev_ioctl_activate_sensors(struct mpu_private_data *mpu)
-{
-	ktime_t ktime;
-	struct i2c_client *client = mpu->client;
-
-	dev_dbg(&client->adapter->dev, "%s\n", __func__);
-
-	hrtimer_cancel(&mpu->activate_timer);
-
-	ktime = ktime_set(mpu->activate_timeout / 1000,
-			  (mpu->activate_timeout % 1000) * 1000000);
-	return hrtimer_start(&mpu->activate_timer, ktime, HRTIMER_MODE_REL);
 }
 
 /* ioctl - I/O control */
@@ -871,7 +889,7 @@ static long mpu_dev_ioctl(struct file *file,
 	retval = mutex_lock_interruptible(&mpu->mutex);
 	if (retval) {
 		dev_err(&client->adapter->dev,
-			"%s: mutex_lock_interruptible returned %d\n",
+			"%s: mutex_lock_interruptible returned %d",
 			__func__, retval);
 		return retval;
 	}
@@ -971,12 +989,12 @@ static long mpu_dev_ioctl(struct file *file,
 		break;
 	case MPU_SUSPEND:
 		retval = inv_mpu_suspend(
-				mldl_cfg,
-				slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
-				slave_adapter[EXT_SLAVE_TYPE_ACCEL],
-				slave_adapter[EXT_SLAVE_TYPE_COMPASS],
-				slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
-				arg);
+			mldl_cfg,
+			slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
+			slave_adapter[EXT_SLAVE_TYPE_ACCEL],
+			slave_adapter[EXT_SLAVE_TYPE_COMPASS],
+			slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
+			arg);
 		break;
 	case MPU_RESUME:
 		retval = inv_mpu_resume(
@@ -988,7 +1006,7 @@ static long mpu_dev_ioctl(struct file *file,
 			arg);
 		break;
 	case MPU_PM_EVENT_HANDLED:
-		dev_dbg(&client->adapter->dev, "%s: %d\n", __func__, cmd);
+		dev_dbg(&client->adapter->dev, "%s: %d", __func__, cmd);
 		complete(&mpu->completion);
 		break;
 	case MPU_READ_ACCEL:
@@ -1054,25 +1072,25 @@ static long mpu_dev_ioctl(struct file *file,
 		break;
 	case MPU_READ_ACCEL_OFFSET:
 		{
+
 			retval = copy_to_user((signed short __user *)arg,
-				&cal_data, sizeof(cal_data));
-			if (INV_SUCCESS != retval)
+			  &cal_data, sizeof(cal_data));
+		      if (INV_SUCCESS != retval) {
 				dev_err(&client->adapter->dev,
-				"%s: cmd %x, arg %lu\n", __func__, cmd, arg);
+					"%s: cmd %x, arg %lu",
+					__func__, cmd, arg);
+			}
 		}
-		break;
-	case MPU_ACTIVATE_SENSORS:
-		mpu_dev_ioctl_activate_sensors(mpu);
 		break;
 	default:
 		dev_err(&client->adapter->dev,
-			"%s: Unknown cmd %x, arg %lu\n",
+			"%s: Unknown cmd %x, arg %lu",
 			__func__, cmd, arg);
 		retval = -EINVAL;
 	};
 
 	mutex_unlock(&mpu->mutex);
-	dev_dbg(&client->adapter->dev, "%s: %08x, %08lx, %d\n",
+	dev_dbg(&client->adapter->dev, "%s: %08x, %08lx, %d",
 		__func__, cmd, arg, retval);
 
 	if (retval > 0)
@@ -1090,7 +1108,7 @@ void mpu_dev_early_suspend(struct early_suspend *h)
 	struct i2c_adapter *slave_adapter[EXT_SLAVE_NUM_TYPES];
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
 	int ii;
-	printk(KERN_INFO"[@@@@@%s@@@@@]\n", __func__);
+	pr_info("----------\n%s\n----------", __func__);
 
 	mpu_early_notifier_callback(mpu, PM_SUSPEND_PREPARE, NULL);
 
@@ -1105,12 +1123,12 @@ void mpu_dev_early_suspend(struct early_suspend *h)
 	mutex_lock(&mpu->mutex);
 	if (!mldl_cfg->inv_mpu_cfg->ignore_system_suspend) {
 		(void)inv_mpu_suspend(mldl_cfg,
-			slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
-			slave_adapter[EXT_SLAVE_TYPE_ACCEL],
-			slave_adapter[EXT_SLAVE_TYPE_COMPASS],
-			slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
-			INV_ALL_SENSORS);
-		}
+				slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
+				slave_adapter[EXT_SLAVE_TYPE_ACCEL],
+				slave_adapter[EXT_SLAVE_TYPE_COMPASS],
+				slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
+				INV_ALL_SENSORS);
+	}
 	mutex_unlock(&mpu->mutex);
 }
 
@@ -1122,7 +1140,8 @@ void mpu_dev_early_resume(struct early_suspend *h)
 	struct i2c_adapter *slave_adapter[EXT_SLAVE_NUM_TYPES];
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
 	int ii;
-	printk(KERN_INFO"[@@@@@%s@@@@@]\n", __func__);
+	pr_info("----------\n%s\n----------", __func__);
+
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
 		if (!pdata_slave[ii])
 			slave_adapter[ii] = NULL;
@@ -1173,7 +1192,7 @@ void mpu_shutdown(struct i2c_client *client)
 			slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
 			INV_ALL_SENSORS);
 	mutex_unlock(&mpu->mutex);
-	dev_dbg(&client->adapter->dev, "%s\n", __func__);
+	dev_dbg(&client->adapter->dev, "%s", __func__);
 }
 
 int mpu_dev_suspend(struct i2c_client *client, pm_message_t mesg)
@@ -1184,7 +1203,7 @@ int mpu_dev_suspend(struct i2c_client *client, pm_message_t mesg)
 	struct i2c_adapter *slave_adapter[EXT_SLAVE_NUM_TYPES];
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
 	int ii;
-	printk(KERN_INFO"@@@@@%s@@@@@\n", __func__);
+	pr_info("----------\n%s\n----------", __func__);
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
 		if (!pdata_slave[ii])
 			slave_adapter[ii] = NULL;
@@ -1197,21 +1216,18 @@ int mpu_dev_suspend(struct i2c_client *client, pm_message_t mesg)
 	mutex_lock(&mpu->mutex);
 	if (!mldl_cfg->inv_mpu_cfg->ignore_system_suspend) {
 		dev_dbg(&client->adapter->dev,
-			"%s: suspending on event %d\n", __func__, mesg.event);
+			"%s: suspending on event %d", __func__, mesg.event);
 		(void)inv_mpu_suspend(mldl_cfg,
-			slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
-			slave_adapter[EXT_SLAVE_TYPE_ACCEL],
-			slave_adapter[EXT_SLAVE_TYPE_COMPASS],
-			slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
-			INV_ALL_SENSORS);
+				slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
+				slave_adapter[EXT_SLAVE_TYPE_ACCEL],
+				slave_adapter[EXT_SLAVE_TYPE_COMPASS],
+				slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
+				INV_ALL_SENSORS);
 	} else {
 		dev_dbg(&client->adapter->dev,
-			"%s: Already suspended %d\n", __func__, mesg.event);
+			"%s: Already suspended %d", __func__, mesg.event);
 	}
 	mutex_unlock(&mpu->mutex);
-
-	if (mldl_cfg->pdata->poweron)
-		mldl_cfg->pdata->poweron(0);
 	return 0;
 }
 
@@ -1223,10 +1239,7 @@ int mpu_dev_resume(struct i2c_client *client)
 	struct i2c_adapter *slave_adapter[EXT_SLAVE_NUM_TYPES];
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
 	int ii;
-	printk(KERN_INFO"@@@@@%s@@@@@\n", __func__);
-
-	if (mldl_cfg->pdata->poweron)
-		mldl_cfg->pdata->poweron(1);
+	pr_info("----------\n%s\n----------", __func__);
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
 		if (!pdata_slave[ii])
 			slave_adapter[ii] = NULL;
@@ -1245,7 +1258,7 @@ int mpu_dev_resume(struct i2c_client *client)
 				slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
 				mldl_cfg->inv_mpu_cfg->requested_sensors);
 		dev_dbg(&client->adapter->dev,
-			"%s for pid %d\n", __func__, mpu->pid);
+			"%s for pid %d", __func__, mpu->pid);
 	}
 	mutex_unlock(&mpu->mutex);
 	return 0;
@@ -1266,7 +1279,7 @@ int inv_mpu_register_slave(struct module *slave_module,
 			struct ext_slave_platform_data *slave_pdata,
 			struct ext_slave_descr *(*get_slave_descr)(void))
 {
-	struct mpu_private_data *mpu = mpu_private_data;
+	struct mpu_private_data *mpu = mpu_data;
 	struct mldl_cfg *mldl_cfg;
 	struct ext_slave_descr *slave_descr;
 	struct ext_slave_platform_data **pdata_slave;
@@ -1278,7 +1291,7 @@ int inv_mpu_register_slave(struct module *slave_module,
 
 	if (!mpu) {
 		dev_err(&slave_client->adapter->dev,
-			"%s: Null mpu_private_data\n", __func__);
+			"%s: Null mpu_private_data", __func__);
 		return -EINVAL;
 	}
 	mldl_cfg    = &mpu->mldl_cfg;
@@ -1287,7 +1300,7 @@ int inv_mpu_register_slave(struct module *slave_module,
 
 	if (!slave_descr) {
 		dev_err(&slave_client->adapter->dev,
-			"%s: Null ext_slave_descr\n", __func__);
+			"%s: Null ext_slave_descr", __func__);
 		return -EINVAL;
 	}
 
@@ -1307,7 +1320,7 @@ int inv_mpu_register_slave(struct module *slave_module,
 	slave_pdata->adapt_num	= i2c_adapter_id(slave_client->adapter);
 
 	dev_info(&slave_client->adapter->dev,
-		"%s: +%s Type %d: Addr: %2x IRQ: %2d, Adapt: %2d\n",
+		"%s: +%s Type %d: Addr: %2x IRQ: %2d, Adapt: %2d",
 		__func__,
 		slave_descr->name,
 		slave_descr->type,
@@ -1328,49 +1341,15 @@ int inv_mpu_register_slave(struct module *slave_module,
 	default:
 		irq_name = "none";
 	};
-	if (slave_descr->type == EXT_SLAVE_TYPE_COMPASS
-		&& slave_descr->init) {
-		int retry_cnt = 3;
-#if defined(CONFIG_MPU_SENSORS_AK8975_411)
-		unsigned int reset = mldl_cfg->pdata->reset;
-#endif
-		do {
-			retry_cnt--;
-
-			result = slave_descr->init(slave_client->adapter,
-				slave_descr, slave_pdata);
-			if (result) {
-				dev_err(&slave_client->adapter->dev,
-					"%s init failed %d, cnt %d\n",
-					slave_descr->name, result, retry_cnt);
-#if defined(CONFIG_MPU_SENSORS_AK8975_411)
-				gpio_direction_output(reset, 0);
-				usleep_range(30, 30);
-				gpio_set_value_cansleep(reset, 1);
-				usleep_range(30, 30);
-#endif
-			} else {
-				break;
-			}
-		} while (retry_cnt);
-		if (result) {
-			dev_err(&slave_client->adapter->dev,
-				"%s init failed %d, cnt %d\n",
-				slave_descr->name, result, retry_cnt);
-				goto out_unlock_mutex;
-		}
-
-	} else {
-		if (slave_descr->init) {
-			result = slave_descr->init(slave_client->adapter,
+	if (slave_descr->init) {
+		result = slave_descr->init(slave_client->adapter,
 					slave_descr,
 					slave_pdata);
-			if (result) {
-				dev_err(&slave_client->adapter->dev,
-					"%s init failed %d\n",
-					slave_descr->name, result);
-				goto out_unlock_mutex;
-			}
+		if (result) {
+			dev_err(&slave_client->adapter->dev,
+				"%s init failed %d",
+				slave_descr->name, result);
+			goto out_unlock_mutex;
 		}
 	}
 
@@ -1408,18 +1387,18 @@ out_unlock_mutex:
 	if (!result && irq_name && (slave_pdata->irq > 0)) {
 		int warn_result;
 		dev_info(&slave_client->adapter->dev,
-			"Installing %s irq using %d\n",
+			"Installing %s irq using %d",
 			irq_name,
 			slave_pdata->irq);
 		warn_result = slaveirq_init(slave_client->adapter,
 					slave_pdata, irq_name);
-		if (warn_result)
+		if (result)
 			dev_warn(&slave_client->adapter->dev,
-				"%s irq assigned error: %d\n",
+				"%s irq assigned error: %d",
 				slave_descr->name, warn_result);
 	} else {
 		dev_warn(&slave_client->adapter->dev,
-			"%s irq not assigned: %d %d %d\n",
+			"%s irq not assigned: %d %d %d",
 			slave_descr->name,
 			result, (int)irq_name, slave_pdata->irq);
 	}
@@ -1432,15 +1411,15 @@ void inv_mpu_unregister_slave(struct i2c_client *slave_client,
 			struct ext_slave_platform_data *slave_pdata,
 			struct ext_slave_descr *(*get_slave_descr)(void))
 {
-	struct mpu_private_data *mpu = mpu_private_data;
+	struct mpu_private_data *mpu = mpu_data;
 	struct mldl_cfg *mldl_cfg = &mpu->mldl_cfg;
 	struct ext_slave_descr *slave_descr;
 	int result;
 
+	dev_info(&slave_client->adapter->dev, "%s\n", __func__);
+
 	if (!slave_client || !slave_pdata || !get_slave_descr)
 		return;
-
-	dev_info(&slave_client->adapter->dev, "%s\n", __func__);
 
 	if (slave_pdata->irq)
 		slaveirq_exit(slave_pdata);
@@ -1478,7 +1457,7 @@ static const struct i2c_device_id mpu_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, mpu_id);
 
-static int mpu3050_factory_on(struct i2c_client *client)
+static int mpu6050_factory_on(struct i2c_client *client)
 {
 	struct mpu_private_data *mpu =
 	    (struct mpu_private_data *)i2c_get_clientdata(this_client);
@@ -1489,7 +1468,7 @@ static int mpu3050_factory_on(struct i2c_client *client)
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
 	int ii;
 
-	printk(KERN_INFO"@@@@@ %s : %d @@@@@\n", __func__, __LINE__);
+	pr_info("----------\n%s\n----------", __func__);
 
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
 		if (!pdata_slave[ii])
@@ -1513,7 +1492,7 @@ static int mpu3050_factory_on(struct i2c_client *client)
 	return prev_gyro_suspended;
 }
 
-static ssize_t mpu3050_power_on(struct device *dev,
+static ssize_t mpu6050_power_on(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	int count = 0;
@@ -1524,7 +1503,7 @@ static ssize_t mpu3050_power_on(struct device *dev,
 	return count;
 }
 
-static ssize_t mpu3050_get_temp(struct device *dev,
+static ssize_t mpu6050_get_temp(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	int count = 0;
@@ -1547,27 +1526,30 @@ static ssize_t mpu3050_get_temp(struct device *dev,
 	}
 	slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE] = this_client->adapter;
 
-	mpu3050_factory_on(this_client);
+	mpu6050_factory_on(this_client);
 
-	/*MPUREG_TEMP_OUT_H,	27 0x1b */
-	/*MPUREG_TEMP_OUT_L,	28 0x1c */
+	/* MPUREG_TEMP_OUT_H, */	/* 27 0x1b */
+	/* MPUREG_TEMP_OUT_L, */	/* 28 0x1c */
 	/* TEMP_OUT_H/L: 16-bit temperature data (2's complement data format) */
 	inv_serial_read(slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
-	DEFAULT_MPU_SLAVEADDR, MPUREG_TEMP_OUT_H, 2, data);
+			DEFAULT_MPU_SLAVEADDR,
+			MPUREG_TEMP_OUT_H,
+			2,
+			data);
 	temperature = (short) (((data[0]) << 8) | data[1]);
 	temperature = (((temperature + 521) / 340) + 35);
-	printk(KERN_INFO"read temperature = %d\n", temperature);
+	pr_info("read temperature = %d\n", temperature);
 
 	count = sprintf(buf, "%d\n", temperature);
 
 	return count;
 }
 
-static ssize_t mpu3050_acc_read(struct device *dev,
+static ssize_t mpu6050_acc_read(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 
-	s16 x, y, z, temp;
+	s16 x, y, z;
 	int count = 0;
 	struct mpu_private_data *mpu =
 	    (struct mpu_private_data *) i2c_get_clientdata(this_client);
@@ -1589,30 +1571,26 @@ static ssize_t mpu3050_acc_read(struct device *dev,
 	}
 	slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE] = client->adapter;
 
-
+	/* mutex_lock(&mpu->mutex); */
+	mpu_accel_enable_set(1);
+	msleep(20);
 	retval = inv_serial_read(slave_adapter[EXT_SLAVE_TYPE_ACCEL],
-		0x68, 0x3B, 6, data);
+				0x68, 0x3B, 6, data);
 
 	x = (s16)(((data[0] << 8) | data[1]) - cal_data.x);/*CAL_DIV;*/
 	y = (s16)(((data[2] << 8) | data[3]) - cal_data.y);/*CAL_DIV;*/
 	z = (s16)(((data[4] << 8) | data[5]) - cal_data.z);/*CAL_DIV;*/
 
+	z *= -1;
 
-	if (mldl_cfg->pdata->orientation[0]) {
-		x *= mldl_cfg->pdata->orientation[0];
-		y *= mldl_cfg->pdata->orientation[4];
-	} else {
-		temp = x*mldl_cfg->pdata->orientation[1];
-		x = y*mldl_cfg->pdata->orientation[3];
-		y = temp;
-	}
-	z *= mldl_cfg->pdata->orientation[8];
+	pr_info("mpu6050_acc_read x: %d y: %d z: %d", y, x, z);
+	mpu_accel_enable_set(0);
+	msleep(20);
+	/* mutex_unlock(&mpu->mutex); */
 
-
-	count = sprintf(buf, "%d, %d, %d\n", x, y, z);
+	count = sprintf(buf, "%d, %d, %d\n", y, x, z);
 
 	return count;
-
 }
 
 static ssize_t accel_calibration_show(struct device *dev,
@@ -1621,167 +1599,44 @@ static ssize_t accel_calibration_show(struct device *dev,
 {
 
 	int count = 0;
-	int ret = 1;
 
-	printk(buf, "%d %d %d\n",
+	pr_info(" accel_calibration_show %d %d %d",
 		cal_data.x, cal_data.y, cal_data.z);
 
-	if (!cal_data.x && !cal_data.y && !cal_data.z)
-		ret = -1;
-
-	count = sprintf(buf, "%d %d %d %d\n", ret, cal_data.x,
-		cal_data.y, cal_data.z);
-
+	count = sprintf(buf, "%d %d %d\n", cal_data.x, cal_data.y, cal_data.z);
 	return count;
 }
 
 static ssize_t accel_calibration_store(struct device *dev,
-				      struct device_attribute *attr,
-				      const char *buf, size_t size)
-{
-	int err;
-	int enable = 0;
-
-	err = kstrtoint(buf, 10, &enable);
-
-	if (err) {
-		pr_err("ERROR: %s got bad char\n", __func__);
-		return -EINVAL;
-	}
-
-	err = accel_do_calibrate(enable);
-	if (err < 0) {
-		pr_err("%s: accel_do_calibrate() failed\n", __func__);
-		return err;
-	}
-
-	return size;
-}
-
-static int mpu_alert_factory_on(struct i2c_client *client)
-{
-	struct mpu_private_data *mpu =
-	    (struct mpu_private_data *)i2c_get_clientdata(this_client);
-	struct mldl_cfg *mldl_cfg = &mpu->mldl_cfg;
-	int prev_gyro_suspended = 0;
-
-	struct i2c_adapter *slave_adapter[EXT_SLAVE_NUM_TYPES];
-	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
-	int ii;
-
-	printk(KERN_INFO"@@@@@ %s : %d @@@@@\n", __func__, __LINE__);
-
-	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
-		if (!pdata_slave[ii])
-			slave_adapter[ii] = NULL;
-		else
-			slave_adapter[ii] =
-				i2c_get_adapter(pdata_slave[ii]->adapt_num);
-	}
-	slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE] = client->adapter;
-
-	mutex_lock(&mpu->mutex);
-	inv_mpu_resume(mldl_cfg,
-				slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
-				slave_adapter[EXT_SLAVE_TYPE_ACCEL],
-				slave_adapter[EXT_SLAVE_TYPE_COMPASS],
-				slave_adapter[EXT_SLAVE_TYPE_PRESSURE],
-				INV_THREE_AXIS_ACCEL);
-	mutex_unlock(&mpu->mutex);
-
-	return prev_gyro_suspended;
-}
-
-static ssize_t accel_reactive_alert_store(struct device *dev,
 					struct device_attribute *attr,
-					const char *buf, size_t count)
+					const char *buf, size_t size)
 {
-	int err = 0;
-	bool onoff = false, factory_test = false;
-	struct mpu_private_data *mpu =
-	    (struct mpu_private_data *) i2c_get_clientdata(this_client);
-	struct i2c_client *client = mpu->client;
-	struct mldl_cfg *mldl_cfg = &mpu->mldl_cfg;
-	struct i2c_adapter *slave_adapter;
-	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
+	bool do_calib;
+	int err;
+	int count = 0;
+	char str[11];
 
-	unsigned char reg_data = 0;
-
-	slave_adapter =
-		i2c_get_adapter(pdata_slave[EXT_SLAVE_TYPE_ACCEL]->adapt_num);
-
-
-	if (sysfs_streq(buf, "1")) {
-		onoff = true;
-	} else if (sysfs_streq(buf, "0")) {
-		onoff = false;
-	} else if (sysfs_streq(buf, "2")) {
-		onoff = true;
-		factory_test = true;
-
-		err = inv_serial_read(slave_adapter, 0x68,
-			MPUREG_INT_ENABLE, sizeof(reg_data), &reg_data);
-		if (err)
-			pr_err("%s: read INT failed\n", __func__);
-		reg_data |= BIT_RAW_RDY_EN;
-		err = inv_serial_single_write(slave_adapter, 0x68,
-				 MPUREG_INT_ENABLE,
-				 reg_data);
-		if (err)
-			pr_err("%s: i2c write INT reg failed\n", __func__);
-		err = inv_serial_read(slave_adapter, 0x68,
-				MPUREG_INT_ENABLE, sizeof(reg_data), &reg_data);
-		if (err)
-			pr_err("%s: read INT failed\n", __func__);
-		mpu_alert_factory_on(this_client);
-		err = inv_serial_single_write(slave_adapter, 0x68,
-			MPUREG_SMPLRT_DIV,
-			(unsigned char)19);
-		if (err)
-			pr_err("%s: set_DIV\n", __func__);
-	} else {
-		pr_err("%s: invalid value %d\n", __func__, *buf);
+	if (sysfs_streq(buf, "1"))
+		do_calib = true;
+	else if (sysfs_streq(buf, "0"))
+		do_calib = false;
+	else {
+		pr_debug("%s: invalid value %d", __func__, *buf);
 		return -EINVAL;
 	}
 
-	if (onoff  && !mldl_cfg->inv_mpu_state->accel_reactive) {
-		pr_info("reactive alert is on.\n");
-		enable_irq_wake(client->irq);
+	err = accel_do_calibrate(do_calib);
+	if (err < 0)
+		pr_err("%s: accel_do_calibrate() failed", __func__);
 
-	} else if (!onoff  && mldl_cfg->inv_mpu_state->accel_reactive) {
-		pr_info("reactive alert is off.\n");
-		disable_irq_wake(client->irq);
-		err = inv_serial_read(slave_adapter, 0x68,
-				MPUREG_INT_ENABLE, sizeof(reg_data), &reg_data);
-		if (err)
-			pr_err("%s: read INT failed\n", __func__);
-		reg_data &= ~BIT_MOT_EN;
-		err = inv_serial_single_write(slave_adapter, 0x68,
-				 MPUREG_INT_ENABLE,
-				 reg_data);
-		if (err)
-			pr_err("%s: i2c write INT reg failed\n", __func__);
-	}
+	pr_info("accel_calibration_show :%d %d %d",
+		cal_data.x, cal_data.y, cal_data.z);
+	if (err > 0)
+		err = 0;
+	count = sprintf(str, "%d\n", err);
 
-	mldl_cfg->inv_mpu_state->use_accel_reactive = onoff;
-	mldl_cfg->inv_mpu_state->accel_reactive = onoff;
-	mldl_cfg->inv_mpu_state->reactive_factory = factory_test;
+	strcpy(str, buf);
 	return count;
-}
-
-
-static ssize_t accel_reactive_alert_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct mpu_private_data *mpu =
-	    (struct mpu_private_data *) i2c_get_clientdata(this_client);
-	struct mldl_cfg *mldl_cfg = &mpu->mldl_cfg;
-
-	if (mldl_cfg->inv_mpu_state->use_accel_reactive && 
-		!mldl_cfg->inv_mpu_state->accel_reactive)
-		return sprintf(buf, "%d\n", 1);
-	else
-		return sprintf(buf, "%d\n", 0);
 }
 
 static ssize_t mpu_vendor_show(struct device *dev,
@@ -1796,7 +1651,6 @@ static ssize_t mpu_name_show(struct device *dev,
 	return sprintf(buf, "%s\n", MPU_PART_ID);
 }
 
-#if defined(CONFIG_MPU_SENSORS_AK8975_411)
 static int akm8975_wait_for_data_ready(struct i2c_adapter *sl_adapter)
 {
 	int err;
@@ -1839,10 +1693,6 @@ static ssize_t ak8975_adc(struct device *dev,
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
 	int ii;
 
-	if (pdata_slave[EXT_SLAVE_TYPE_COMPASS] == NULL)
-		return snprintf(strbuf, PAGE_SIZE, "%s, %d, %d, %d\n",
-			"NG", 0, 0, 0);
-
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
 		if (!pdata_slave[ii])
 			slave_adapter[ii] = NULL;
@@ -1850,14 +1700,14 @@ static ssize_t ak8975_adc(struct device *dev,
 			slave_adapter[ii] =
 				i2c_get_adapter(pdata_slave[ii]->adapt_num);
 	}
-	slave_adapter[EXT_SLAVE_TYPE_COMPASS] = client->adapter;
+
+	pr_info("%s %s", __func__, client->name);
 
 	mutex_lock(&mpu->mutex);
 
 	/* start ADC conversion */
 	err = inv_serial_single_write(slave_adapter[EXT_SLAVE_TYPE_COMPASS],
-	0x0C, AK8975_REG_CNTL,
-	AK8975_MODE_SNG_MEASURE);
+	0x0C, AK8975_REG_CNTL, AK8975_MODE_SNG_MEASURE);
 
 	if (err)
 		pr_err("ak8975_adc write err:%d\n", err);
@@ -1895,7 +1745,7 @@ static ssize_t ak8975_adc(struct device *dev,
 
 	pr_err("%s: raw x = %d, y = %d, z = %d\n", __func__, x, y, z);
 
-	return snprintf(strbuf, PAGE_SIZE, "%s,%d,%d,%d\n",
+	return snprintf(strbuf, PAGE_SIZE, "%s, %d, %d, %d\n",
 		(success ? "OK" : "NG"), x, y, z);
 }
 
@@ -1911,10 +1761,6 @@ static ssize_t ak8975_check_cntl(struct device *dev,
 
 	int ii, err;
 	u8 data;
-
-	if (pdata_slave[EXT_SLAVE_TYPE_COMPASS] == NULL)
-		return snprintf(buf, PAGE_SIZE, "%s\n", "NG");
-
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
 		if (!pdata_slave[ii])
 			slave_adapter[ii] = NULL;
@@ -1922,7 +1768,6 @@ static ssize_t ak8975_check_cntl(struct device *dev,
 			slave_adapter[ii] =
 				i2c_get_adapter(pdata_slave[ii]->adapt_num);
 	}
-	slave_adapter[EXT_SLAVE_TYPE_COMPASS] = client->adapter;
 	mutex_lock(&mpu->mutex);
 	err = inv_serial_single_write(slave_adapter[EXT_SLAVE_TYPE_COMPASS],
 		0x0C, AK8975_REG_CNTL,
@@ -1970,8 +1815,6 @@ static ssize_t akm8975_rawdata_show(struct device *dev,
 			slave_adapter[ii] =
 				i2c_get_adapter(pdata_slave[ii]->adapt_num);
 	}
-	slave_adapter[EXT_SLAVE_TYPE_COMPASS] = client->adapter;
-
 
 	mutex_lock(&mpu->mutex);
 	err = inv_serial_single_write(slave_adapter[EXT_SLAVE_TYPE_COMPASS],
@@ -2038,11 +1881,7 @@ static ssize_t ak8975c_get_status(struct device *dev,
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
 	int success;
 
-	struct ak8975_private_data *private_data;
-	if (pdata_slave[EXT_SLAVE_TYPE_COMPASS] == NULL)
-		return snprintf(buf, PAGE_SIZE, "%s\n", "NG");
-
-	private_data =
+	struct ak8975_private_data *private_data =
 		(struct ak8975_private_data *)
 		pdata_slave[EXT_SLAVE_TYPE_COMPASS]->private_data;
 	if ((private_data->init.asa[0] == 0) |
@@ -2135,8 +1974,6 @@ int ak8975c_selftest(struct i2c_adapter *slave_adapter,
 		return 1;
 	else
 		return 0;
-
-
 }
 
 static ssize_t ak8975c_get_selftest(struct device *dev,
@@ -2149,19 +1986,12 @@ static ssize_t ak8975c_get_selftest(struct device *dev,
 
 	struct i2c_adapter *slave_adapter[EXT_SLAVE_NUM_TYPES];
 	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
-	struct ak8975_private_data *private_data;
-
+	struct ak8975_private_data *private_data =
+		(struct ak8975_private_data *)
+		pdata_slave[EXT_SLAVE_TYPE_COMPASS]->private_data;
 	int ii, success;
 	int sf[3] = {0,};
 	int retry = 3;
-
-	if (pdata_slave[EXT_SLAVE_TYPE_COMPASS] == NULL)
-		return snprintf(buf, PAGE_SIZE, "%d, %d, %d, %d\n",
-		0, 0, 0, 0);
-
-	private_data =
-		(struct ak8975_private_data *)
-		pdata_slave[EXT_SLAVE_TYPE_COMPASS]->private_data;
 
 	for (ii = 0; ii < EXT_SLAVE_NUM_TYPES; ii++) {
 		if (!pdata_slave[ii])
@@ -2170,7 +2000,6 @@ static ssize_t ak8975c_get_selftest(struct device *dev,
 			slave_adapter[ii] =
 				i2c_get_adapter(pdata_slave[ii]->adapt_num);
 	}
-	slave_adapter[EXT_SLAVE_TYPE_COMPASS] = client->adapter;
 	do {
 		retry--;
 		success = ak8975c_selftest(
@@ -2195,67 +2024,50 @@ static ssize_t akm_name_show(struct device *dev,
 {
 	return sprintf(buf, "%s\n", MAG_PART_ID);
 }
-#endif
 
-static DEVICE_ATTR(power_on, S_IRUGO, mpu3050_power_on, NULL);
+static DEVICE_ATTR(power_on, S_IRUGO, mpu6050_power_on, NULL);
+static DEVICE_ATTR(temperature, S_IRUGO, mpu6050_get_temp, NULL);
 
-static DEVICE_ATTR(temperature, S_IRUGO,	mpu3050_get_temp, NULL);
+static DEVICE_ATTR(calibration, S_IRUGO | S_IWUSR,
+		accel_calibration_show, accel_calibration_store);
 
-static DEVICE_ATTR(calibration, S_IRUGO|S_IWUSR|S_IWGRP,
-	accel_calibration_show, accel_calibration_store);
-
-static DEVICE_ATTR(raw_data, S_IRUGO, mpu3050_acc_read, NULL);
-
-static DEVICE_ATTR(reactive_alert, S_IRUGO|S_IWUSR|S_IWGRP,
-	accel_reactive_alert_show,
-	accel_reactive_alert_store);
+static DEVICE_ATTR(raw_data, S_IRUGO, mpu6050_acc_read, NULL);
 
 static DEVICE_ATTR(vendor, S_IRUGO, mpu_vendor_show, NULL);
 static DEVICE_ATTR(name, S_IRUGO, mpu_name_show, NULL);
 
 
-#if defined(CONFIG_MPU_SENSORS_AK8975_411)
 static DEVICE_ATTR(adc, S_IRUGO, ak8975_adc, NULL);
 
-static DEVICE_ATTR(dac, S_IRUGO,
-		ak8975_check_cntl, NULL);
-static DEVICE_ATTR(status, S_IRUGO,
-		ak8975c_get_status, NULL);
-static DEVICE_ATTR(selftest, S_IRUGO,
-		ak8975c_get_selftest, NULL);
+static DEVICE_ATTR(dac, S_IRUGO, ak8975_check_cntl, NULL);
+static DEVICE_ATTR(status, S_IRUGO, ak8975c_get_status, NULL);
+static DEVICE_ATTR(selftest, S_IRUGO, ak8975c_get_selftest, NULL);
 
 static struct device_attribute dev_attr_mag_rawdata =
-	__ATTR(raw_data, S_IRUGO,
-	akm8975_rawdata_show, NULL);
+	__ATTR(raw_data, S_IRUGO, akm8975_rawdata_show, NULL);
 
 static struct device_attribute dev_attr_mag_vendor =
-	__ATTR(vendor, S_IRUGO,
-	akm_vendor_show, NULL);
+	__ATTR(vendor, S_IRUGO, akm_vendor_show, NULL);
 
 static struct device_attribute dev_attr_mag_name =
-	__ATTR(name, S_IRUGO,
-	akm_name_show, NULL);
-#endif
+	__ATTR(name, S_IRUGO, akm_name_show, NULL);
 
 static struct device_attribute *gyro_sensor_attrs[] = {
 	&dev_attr_power_on,
 	&dev_attr_temperature,
 	&dev_attr_vendor,
 	&dev_attr_name,
-/*	&dev_attr_selftest,*/
 	NULL,
 };
 
 static struct device_attribute *accel_sensor_attrs[] = {
 	&dev_attr_raw_data,
 	&dev_attr_calibration,
-	&dev_attr_reactive_alert,
 	&dev_attr_vendor,
 	&dev_attr_name,
 	NULL,
 };
 
-#if defined(CONFIG_MPU_SENSORS_AK8975_411)
 static struct device_attribute *magnetic_sensor_attrs[] = {
 	&dev_attr_adc,
 	&dev_attr_mag_rawdata,
@@ -2266,27 +2078,19 @@ static struct device_attribute *magnetic_sensor_attrs[] = {
 	&dev_attr_mag_name,
 	NULL,
 };
-#endif
-
-static struct device *gsensorcal;
-
-
-static struct device *gyro_sensor_device;
-static struct device *accel_sensor_device;
-
-#if defined(CONFIG_MPU_SENSORS_AK8975_411)
-static struct device *magnetic_sensor_device;
-#endif
 
 int mpu_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 {
 	struct mpu_platform_data *pdata;
 	struct mpu_private_data *mpu;
 	struct mldl_cfg *mldl_cfg;
+	struct device *gyro_sensor_device = NULL;
+	struct device *accel_sensor_device = NULL;
+	struct device *magnetic_sensor_device = NULL;
 	int res = 0;
-	int ii = 0;
+	int ii;
 
-	dev_info(&client->adapter->dev, "%s: %d\n", __func__, ii++);
+	pr_info("===========\n%s\n===========", __func__);
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		res = -ENODEV;
@@ -2312,7 +2116,7 @@ int mpu_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 		res = -ENOMEM;
 		goto out_alloc_ram_failed;
 	}
-	mpu_private_data = mpu;
+	mpu_data = mpu;
 	i2c_set_clientdata(client, mpu);
 	this_client = client;
 	mpu->client = client;
@@ -2321,31 +2125,34 @@ int mpu_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 	mutex_init(&mpu->mutex);
 	init_completion(&mpu->completion);
 
+
 	mpu->response_timeout = 1;	/* Seconds */
 	mpu->timeout.function = mpu_pm_timeout;
 	mpu->timeout.data = (u_long) mpu;
 	init_timer(&mpu->timeout);
-
-	mpu->activate_timeout = 10;
-	hrtimer_init(&mpu->activate_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	mpu->activate_timer.function = mpu_actiavte_sensors_callback;
-
+#if 0
+	mpu->nb.notifier_call = mpu_pm_notifier_callback;
+	mpu->nb.priority = 0;
+	res = register_pm_notifier(&mpu->nb);
+	if (res) {
+		dev_err(&client->adapter->dev,
+			"Unable to register pm_notifier %d", res);
+		goto out_register_pm_notifier_failed;
+	}
+#endif
 	pdata = (struct mpu_platform_data *)client->dev.platform_data;
 	if (!pdata) {
-		dev_err(&client->adapter->dev,
-			 "Missing platform data for mpu\n");
-		goto out_whoami_failed;
+		dev_warn(&client->adapter->dev,
+			 "Missing platform data for mpu");
 	}
 	mldl_cfg->pdata = pdata;
-	if (mldl_cfg->pdata->poweron)
-		mldl_cfg->pdata->poweron(1);
 
 	mldl_cfg->mpu_chip_info->addr = client->addr;
 	res = inv_mpu_open(&mpu->mldl_cfg, client->adapter, NULL, NULL, NULL);
 
 	if (res) {
 		dev_err(&client->adapter->dev,
-			"Unable to open %s %d\n", MPU_NAME, res);
+			"Unable to open %s %d", MPU_NAME, res);
 		res = -ENODEV;
 		goto out_whoami_failed;
 	}
@@ -2356,19 +2163,19 @@ int mpu_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 	res = misc_register(&mpu->dev);
 	if (res < 0) {
 		dev_err(&client->adapter->dev,
-			"ERROR: misc_register returned %d\n", res);
+			"ERROR: misc_register returned %d", res);
 		goto out_misc_register_failed;
 	}
 
 	if (client->irq) {
 		dev_info(&client->adapter->dev,
-			 "Installing irq using %d\n", client->irq);
+			 "Installing irq using %d", client->irq);
 		res = mpuirq_init(client, mldl_cfg);
 		if (res)
 			goto out_mpuirq_failed;
 	} else {
 		dev_warn(&client->adapter->dev,
-			 "Missing %s IRQ\n", MPU_NAME);
+			 "Missing %s IRQ", MPU_NAME);
 	}
 	if (!strcmp(mpu_id[1].name, devid->name)) {
 		/* Special case to re-use the inv_mpu_register_slave */
@@ -2393,73 +2200,29 @@ int mpu_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 		}
 	}
 
-#ifdef CONFIG_INPUT_YAS_MAGNETOMETER
-	{
-	__s8 orientation[9] = {
-		1, 0, 0,
-		0, 1, 0,
-		0, 0, 1
-	};
-		/* Special case to re-use the inv_mpu_register_slave */
-		struct ext_slave_platform_data *slave_pdata;
-		slave_pdata = kzalloc(sizeof(*slave_pdata), GFP_KERNEL);
-		if (!slave_pdata) {
-			res = -ENOMEM;
-			goto out_slave_pdata_kzalloc_failed;
-		}
-		slave_pdata->bus = EXT_SLAVE_BUS_PRIMARY;
-		for (ii = 0; ii < 9; ii++)
-			slave_pdata->orientation[ii] = orientation[ii];
-		res = inv_mpu_register_slave(
-			NULL, client,
-			slave_pdata,
-			yas530_ext_get_slave_descr);
-		if (res) {
-			/* if inv_mpu_register_slave fails there are no pointer
-			   references to the memory allocated to slave_pdata */
-			kfree(slave_pdata);
-			goto out_slave_pdata_kzalloc_failed;
-		}
-	}
-#endif /*CONFIG_INPUT_YAS_MAGNETOMETER*/
-
-
-	res = sensors_register(gyro_sensor_device, NULL,
-	gyro_sensor_attrs, "gyro_sensor");
+	res = sensors_register(gyro_sensor_device, NULL, gyro_sensor_attrs,
+				"gyro_sensor");
 	if (res) {
-		printk(KERN_ERR
-			"%s: cound not register gyro sensor device(%d).\n",
-			__func__, res);
-	}
-
-	res = sensors_register(accel_sensor_device, NULL,
-		accel_sensor_attrs, "accelerometer_sensor");
-	if (res) {
-		printk(KERN_ERR
-			"%s: cound not register accelerometer sensor device(%d).\n",
-			__func__, res);
+		pr_err("%s: cound not register gyro sensor device(%d).",
+				__func__, res);
 		goto out_sensor_register_failed;
 	}
 
-#if defined(CONFIG_MPU_SENSORS_AK8975_411)
+	res = sensors_register(accel_sensor_device, NULL, accel_sensor_attrs,
+				"accelerometer_sensor");
+	if (res) {
+		pr_err("%s: cound not register accelerometer " \
+				"sensor device(%d).",
+				__func__, res);
+		goto out_sensor_register_failed;
+	}
+
 	res = sensors_register(magnetic_sensor_device, NULL,
-		magnetic_sensor_attrs, "magnetic_sensor");
+			magnetic_sensor_attrs, "magnetic_sensor");
 	if (res) {
-		printk(KERN_ERR
-			"%s: cound not register magnetic sensor device(%d).\n",
-			__func__, res);
+		pr_err("%s: cound not register magnetic sensor device(%d).",
+				__func__, res);
 		goto out_sensor_register_failed;
-	}
-#endif
-
-	gsensorcal = device_create(sec_class, NULL, 0, mpu, "gsensorcal");
-	if (IS_ERR(gsensorcal))
-		printk(KERN_ERR "Failed to create device!");
-
-	if (device_create_file(gsensorcal, &dev_attr_calibration) < 0) {
-		printk(KERN_ERR "Failed to create device file(%s)!\n",
-			dev_attr_calibration.attr.name);
-		goto out_gsensorcal_failed;
 	}
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -2471,7 +2234,6 @@ int mpu_probe(struct i2c_client *client, const struct i2c_device_id *devid)
 
 	return res;
 
-out_gsensorcal_failed:
 out_sensor_register_failed:
 out_slave_pdata_kzalloc_failed:
 	if (client->irq)
@@ -2481,13 +2243,17 @@ out_mpuirq_failed:
 out_misc_register_failed:
 	inv_mpu_close(&mpu->mldl_cfg, client->adapter, NULL, NULL, NULL);
 out_whoami_failed:
+	unregister_pm_notifier(&mpu->nb);
+#if 0
+out_register_pm_notifier_failed:
+#endif
 	kfree(mldl_cfg->mpu_ram->ram);
-	mpu_private_data = NULL;
+	mpu_data = NULL;
 out_alloc_ram_failed:
 	kfree(mpu);
 out_alloc_data_failed:
 out_check_functionality_failed:
-	dev_err(&client->adapter->dev, "%s failed %d\n", __func__, res);
+	dev_err(&client->adapter->dev, "%s failed %d", __func__, res);
 	return res;
 
 }
@@ -2509,7 +2275,7 @@ static int mpu_remove(struct i2c_client *client)
 	}
 
 	slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE] = client->adapter;
-	dev_dbg(&client->adapter->dev, "%s\n", __func__);
+	dev_dbg(&client->adapter->dev, "%s", __func__);
 
 	inv_mpu_close(mldl_cfg,
 		slave_adapter[EXT_SLAVE_TYPE_GYROSCOPE],
@@ -2534,6 +2300,7 @@ static int mpu_remove(struct i2c_client *client)
 
 	misc_deregister(&mpu->dev);
 
+	unregister_pm_notifier(&mpu->nb);
 
 	kfree(mpu->mldl_cfg.mpu_ram->ram);
 	kfree(mpu);
@@ -2560,15 +2327,15 @@ static struct i2c_driver mpu_driver = {
 static int __init mpu_init(void)
 {
 	int res = i2c_add_driver(&mpu_driver);
-	pr_info("%s: Probe name %s\n", __func__, MPU_NAME);
+	pr_info("%s: Probe name %s", __func__, MPU_NAME);
 	if (res)
-		pr_err("%s failed\n", __func__);
+		pr_err("%s failed", __func__);
 	return res;
 }
 
 static void __exit mpu_exit(void)
 {
-	pr_info("%s\n", __func__);
+	pr_info("%s", __func__);
 	i2c_del_driver(&mpu_driver);
 }
 

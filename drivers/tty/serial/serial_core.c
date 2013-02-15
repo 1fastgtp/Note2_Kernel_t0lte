@@ -162,13 +162,17 @@ static int uart_startup(struct tty_struct *tty, struct uart_state *state, int in
 	 * buffer.
 	 */
 	if (!state->xmit.buf) {
+		unsigned long flags;
+
 		/* This is protected by the per port mutex */
 		page = get_zeroed_page(GFP_KERNEL);
 		if (!page)
 			return -ENOMEM;
 
+		spin_lock_irqsave(&uport->lock, flags);
 		state->xmit.buf = (unsigned char *) page;
 		uart_circ_clear(&state->xmit);
+		spin_unlock_irqrestore(&uport->lock, flags);
 	}
 
 	retval = uport->ops->startup(uport);
@@ -261,8 +265,11 @@ static void uart_shutdown(struct tty_struct *tty, struct uart_state *state)
 	 * Free the transmit buffer page.
 	 */
 	if (state->xmit.buf) {
+		unsigned long flags;
+		spin_lock_irqsave(&uport->lock, flags);
 		free_page((unsigned long)state->xmit.buf);
 		state->xmit.buf = NULL;
+		spin_unlock_irqrestore(&uport->lock, flags);
 	}
 }
 
@@ -471,10 +478,12 @@ static inline int __uart_put_char(struct uart_port *port,
 	unsigned long flags;
 	int ret = 0;
 
-	if (!circ->buf)
-		return 0;
-
 	spin_lock_irqsave(&port->lock, flags);
+	if (!circ->buf) {
+		spin_unlock_irqrestore(&port->lock, flags);
+		return 0;
+	}
+
 	if (uart_circ_chars_free(circ) != 0) {
 		circ->buf[circ->head] = c;
 		circ->head = (circ->head + 1) & (UART_XMIT_SIZE - 1);
@@ -517,10 +526,12 @@ static int uart_write(struct tty_struct *tty,
 	port = state->uart_port;
 	circ = &state->xmit;
 
-	if (!circ->buf)
-		return 0;
-
 	spin_lock_irqsave(&port->lock, flags);
+	if (!circ->buf) {
+		spin_unlock_irqrestore(&port->lock, flags);
+		return 0;
+	}
+
 	while (1) {
 		c = CIRC_SPACE_TO_END(circ->head, circ->tail, UART_XMIT_SIZE);
 		if (count < c)
@@ -2005,11 +2016,7 @@ int uart_resume_port(struct uart_driver *drv, struct uart_port *uport)
 		 */
 		if (port->tty && port->tty->termios && termios.c_cflag == 0)
 			termios = *(port->tty->termios);
-		/*
-		 * As we need to set the uart clock rate back to 7.3 MHz.
-		 * We need this change.
-		 *
-		 */
+
 		if (console_suspend_enabled)
 			uart_change_pm(state, 0);
 		uport->ops->set_termios(uport, &termios, NULL);
@@ -2332,6 +2339,7 @@ void uart_unregister_driver(struct uart_driver *drv)
 	tty_unregister_driver(p);
 	put_tty_driver(p);
 	kfree(drv->state);
+	drv->state = NULL;
 	drv->tty_driver = NULL;
 }
 

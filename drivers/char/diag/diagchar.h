@@ -19,7 +19,7 @@
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
 #include <mach/msm_smd.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <asm/mach-types.h>
 /* Size of the USB buffers used for read and write*/
 #define USB_MAX_OUT_BUF 4096
@@ -35,9 +35,9 @@
 #define POOL_TYPE_HDLC		2
 #define POOL_TYPE_WRITE_STRUCT	4
 #define POOL_TYPE_ALL		7
-#define MODEM_DATA 		1
-#define QDSP_DATA  		2
-#define APPS_DATA  		3
+#define MODEM_DATA		1
+#define QDSP_DATA		2
+#define APPS_DATA		3
 #define SDIO_DATA		4
 #define WCNSS_DATA		5
 #define HSIC_DATA		6
@@ -45,7 +45,7 @@
 #define APPS_PROC		1
 #define QDSP_PROC		2
 #define WCNSS_PROC		3
-#define MSG_MASK_SIZE 10000
+#define MSG_MASK_SIZE 9500
 #define LOG_MASK_SIZE 8000
 #define EVENT_MASK_SIZE 1000
 #define USER_SPACE_DATA 8000
@@ -54,6 +54,7 @@
 #define DIAG_CTRL_MSG_LOG_MASK	9
 #define DIAG_CTRL_MSG_EVENT_MASK	10
 #define DIAG_CTRL_MSG_F3_MASK	11
+#define ZERO_CFG_SUBPACKET_MAX 15 // zero_pky.patch by jagadish
 
 /* Maximum number of pkt reg supported at initialization*/
 extern unsigned int diag_max_reg;
@@ -132,7 +133,9 @@ struct diagchar_dev {
 	struct diag_client_map *client_map;
 	int *data_ready;
 	int num_clients;
+	int polling_reg_flag;
 	struct diag_write_device *buf_tbl;
+	int use_device_tree;
 
 	/* Memory pool parameters */
 	unsigned int itemsize;
@@ -152,7 +155,6 @@ struct diagchar_dev {
 	int count_write_struct_pool;
 	int used;
 	/* Buffers for masks */
-	struct mutex diag_cntl_mutex;
 	struct diag_ctrl_event_mask *event_mask;
 	struct diag_ctrl_log_mask *log_mask;
 	struct diag_ctrl_msg_mask *msg_mask;
@@ -163,7 +165,8 @@ struct diagchar_dev {
 	unsigned char *buf_in_qdsp_1;
 	unsigned char *buf_in_qdsp_2;
 	unsigned char *buf_in_qdsp_cntl;
-	unsigned char *buf_in_wcnss;
+	unsigned char *buf_in_wcnss_1;
+	unsigned char *buf_in_wcnss_2;
 	unsigned char *buf_in_wcnss_cntl;
 	unsigned char *usb_buf_out;
 	unsigned char *apps_rsp_buf;
@@ -182,7 +185,8 @@ struct diagchar_dev {
 	int in_busy_2;
 	int in_busy_qdsp_1;
 	int in_busy_qdsp_2;
-	int in_busy_wcnss;
+	int in_busy_wcnss_1;
+	int in_busy_wcnss_2;
 	int read_len_legacy;
 	unsigned char *hdlc_buf;
 	unsigned hdlc_count;
@@ -218,8 +222,10 @@ struct diagchar_dev {
 	struct diag_request *write_ptr_svc;
 	struct diag_request *write_ptr_qdsp_1;
 	struct diag_request *write_ptr_qdsp_2;
-	struct diag_request *write_ptr_wcnss;
+	struct diag_request *write_ptr_wcnss_1;
+	struct diag_request *write_ptr_wcnss_2;
 	int logging_mode;
+	int sub_logging_mode;
 	int mask_check;
 	int logging_process_id;
 #ifdef CONFIG_DIAG_SDIO_PIPE
@@ -243,19 +249,27 @@ struct diagchar_dev {
 	int hsic_ch;
 	int hsic_device_enabled;
 	int hsic_device_opened;
+	int hsic_suspend;
 	int read_len_mdm;
 	int in_busy_hsic_read_on_mdm;
 	int in_busy_hsic_write_on_mdm;
 	int in_busy_hsic_write;
 	int in_busy_hsic_read;
 	int usb_mdm_connected;
+	unsigned int zero_cfg_mode; // zero_pky.patch by jagadish
+	unsigned int zero_cfg_index; // zero_pky.patch by jagadish
+	unsigned int zero_cfg_packet_lens_index; // zero_pky.patch by jagadish
 	struct usb_diag_ch *mdm_ch;
 	struct workqueue_struct *diag_hsic_wq;
 	struct work_struct diag_read_mdm_work;
 	struct work_struct diag_read_hsic_work;
+	struct work_struct diag_zero_cfg_hsic_work; // zero_pky.patch by jagadish
+	struct work_struct diag_disconnect_work;
+	struct work_struct diag_usb_read_complete_work;
 	struct diag_request *usb_read_mdm_ptr;
 	struct diag_request *write_ptr_mdm;
-#endif
+	struct pid *silent_log_pid;
+	#endif
 };
 
 extern struct diagchar_dev *driver;

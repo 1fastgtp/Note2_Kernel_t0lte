@@ -169,7 +169,8 @@ static struct irq_chip max77693_irq_chip = {
 static irqreturn_t max77693_irq_thread(int irq, void *data)
 {
 	struct max77693_dev *max77693 = data;
-	u8 irq_reg[MAX77693_IRQ_GROUP_NR] = {};
+	u8 irq_reg[MAX77693_IRQ_GROUP_NR] = {0};
+	u8 tmp_irq_reg[MAX77693_IRQ_GROUP_NR] = {};
 	u8 irq_src;
 	int ret;
 	int i;
@@ -177,8 +178,7 @@ static irqreturn_t max77693_irq_thread(int irq, void *data)
 		gpio_get_value(max77693->irq_gpio));
 
 clear_retry:
-	ret = max77693_read_reg(max77693->i2c,
-		MAX77693_PMIC_REG_INTSRC, &irq_src);
+	ret = max77693_read_reg(max77693->i2c, MAX77693_PMIC_REG_INTSRC, &irq_src);
 	if (ret < 0) {
 		dev_err(max77693->dev, "Failed to read interrupt source: %d\n",
 				ret);
@@ -190,34 +190,33 @@ clear_retry:
 		/* CHG_INT */
 		ret = max77693_read_reg(max77693->i2c, MAX77693_CHG_REG_CHG_INT,
 				&irq_reg[CHG_INT]);
-		pr_info("%s: charger interrupt(0x%02x)\n",
-			__func__, irq_reg[CHG_INT]);
+		pr_info("%s: charger interrupt(0x%02x)\n", __func__, irq_reg[CHG_INT]);
 	}
 
 	if (irq_src & MAX77693_IRQSRC_TOP) {
 		/* TOPSYS_INT */
-		ret = max77693_read_reg(max77693->i2c,
-				MAX77693_PMIC_REG_TOPSYS_INT,
+		ret = max77693_read_reg(max77693->i2c, MAX77693_PMIC_REG_TOPSYS_INT,
 				&irq_reg[TOPSYS_INT]);
-		pr_info("%s: topsys interrupt(0x%02x)\n",
-			__func__, irq_reg[TOPSYS_INT]);
+		pr_info("%s: topsys interrupt(0x%02x)\n", __func__, irq_reg[TOPSYS_INT]);
 	}
 
 	if (irq_src & MAX77693_IRQSRC_FLASH) {
 		/* LED_INT */
-		ret = max77693_read_reg(max77693->i2c,
-				MAX77693_LED_REG_FLASH_INT,
+		ret = max77693_read_reg(max77693->i2c, MAX77693_LED_REG_FLASH_INT,
 				&irq_reg[LED_INT]);
-		pr_info("%s: led interrupt(0x%02x)\n",
-			__func__, irq_reg[LED_INT]);
+		pr_info("%s: led interrupt(0x%02x)\n", __func__, irq_reg[LED_INT]);
 	}
 
 	if (irq_src & MAX77693_IRQSRC_MUIC) {
 		/* MUIC INT1 ~ INT3 */
-		max77693_bulk_read(max77693->muic,
-		MAX77693_MUIC_REG_INT1,
-		MAX77693_NUM_IRQ_MUIC_REGS,
-				&irq_reg[MUIC_INT1]);
+		max77693_bulk_read(max77693->muic, MAX77693_MUIC_REG_INT1,
+				MAX77693_NUM_IRQ_MUIC_REGS,
+				&tmp_irq_reg[MUIC_INT1]);
+
+		/* Or temp irq register to irq register for if it retries */
+		for (i = MUIC_INT1; i < MAX77693_IRQ_GROUP_NR; i++)
+			irq_reg[i] |= tmp_irq_reg[i];
+
 		pr_info("%s: muic interrupt(0x%02x, 0x%02x, 0x%02x)\n",
 			__func__, irq_reg[MUIC_INT1],
 			irq_reg[MUIC_INT2], irq_reg[MUIC_INT3]);
@@ -226,8 +225,10 @@ clear_retry:
 	pr_debug("%s: irq gpio post-state(0x%02x)\n", __func__,
 		gpio_get_value(max77693->irq_gpio));
 
-	if (gpio_get_value(max77693->irq_gpio) == 0)
+	if (gpio_get_value(max77693->irq_gpio) == 0) {
+		pr_warn("%s: irq_gpio is not High!\n", __func__);
 		goto clear_retry;
+	}
 
 	/* Apply masking */
 	for (i = 0; i < MAX77693_IRQ_GROUP_NR; i++) {

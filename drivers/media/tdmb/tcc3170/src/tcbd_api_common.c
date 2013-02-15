@@ -216,7 +216,7 @@ s32 tcbd_read_stream(struct tcbd_device *_device, u8 *_buff, s32 *_size)
 	bytes_remain = SWAP16(bytes_remain) << 2;
 	bytes_read = bytes_read + bytes_remain - _device->size_more_read;
 	tcbd_debug(DEBUG_STREAM_READ, "%d bytes remain, real data size:%d\n",
-						bytes_remain, bytes_read);
+		bytes_remain, bytes_read);
 
 	if ((_device->intr_threshold << 1) < bytes_read) {
 		tcbd_debug(DEBUG_ERROR, "Could not read data over "
@@ -277,7 +277,7 @@ s32 tcbd_tune_frequency(
 	ret |= tcbd_demod_tune_frequency(_device, _freq_khz, _bw_khz);
 	if (ret < 0) {
 		tcbd_debug(DEBUG_ERROR, "failed to tune frequency "
-					"to demodulator!! ret:%d\n", ret);
+			"to demodulator!! ret:%d\n", ret);
 		return ret;
 	}
 	_device->prev_band = _device->curr_band;
@@ -366,8 +366,8 @@ static inline s32 tcbd_calc_threshold(struct tcbd_service *_service)
 	tcbd_debug(DEBUG_API_COMMON, "ptype:%s, bitrate :%d, interrupt "
 			"threshold:%d\n", (_service->ptype) ? "EEP" : "UEP",
 			 _service->bitrate, threshold);
-	threshold = (threshold>>1);
-	return threshold;
+
+	return threshold>>1;
 }
 
 static inline s32 tcbd_find_empty_slot(
@@ -414,11 +414,11 @@ static inline s32 tcbd_set_service(struct tcbd_device *_device,
 		if (_flag == FLAG_LONG_PARAM) {
 			threshold = tcbd_calc_threshold(_service);
 			sel_stream = STREAM_SET_GARBAGE(threshold) |
-							STREAM_TYPE_ALL;
+				STREAM_TYPE_ALL;
 		} else {
-			threshold = TCBD_MAX_THRESHOLD;
-			sel_stream = STREAM_SET_GARBAGE(TCBD_MAX_THRESHOLD) |
-							STREAM_TYPE_ALL;
+		threshold = TCBD_MAX_THRESHOLD;
+		sel_stream = STREAM_SET_GARBAGE(TCBD_MAX_THRESHOLD) |
+				STREAM_TYPE_ALL;
 		}
 		tcbd_debug(DEBUG_API_COMMON, "threshold : %d\n", threshold);
 		en_cmd_fifo = ENABLE_CMD_FIFO;
@@ -468,7 +468,7 @@ s32 tcbd_register_service(struct tcbd_device *_device, u8 _subch_id,
 
 	if (tcbd_find_used_slot(mult_service, _subch_id) >= 0) {
 		tcbd_debug(DEBUG_ERROR, "aready registerd service! "
-					"subch_id:%d\n", _subch_id);
+			"subch_id:%d\n", _subch_id);
 		return -TCERR_AREADY_REGISTERED;
 	}
 
@@ -592,7 +592,7 @@ s32 tcbd_read_fic_data(struct tcbd_device *_device, u8 *_buff,	s32 _size)
 exit_read_fic:
 	tcbd_clear_irq(_device, status);
 	return ret;
-}
+	}
 
 static s32 tcbd_disp_dsp_debug(struct tcbd_device *_device)
 {
@@ -609,8 +609,8 @@ static s32 tcbd_disp_dsp_debug(struct tcbd_device *_device)
 	if (ret < 0) {
 		tcbd_debug(DEBUG_ERROR, "failed to read mail box, "
 					"err:%d\n", ret);
-		return ret;
-	}
+	return ret;
+}
 
 	for (i = 0; i < 6; i++)
 		pos_buf += sprintf(debug_buff + pos_buf, "[%d:%08X]",

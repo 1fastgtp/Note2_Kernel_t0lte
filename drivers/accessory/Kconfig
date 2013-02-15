@@ -1,14 +1,11 @@
 #
 # Accessory Configuration
 #
-source "drivers/accessory/mhl_tab_v2/Kconfig"
 
 menuconfig ACCESSORY
 	bool "Accessory devices"
-	default n
+	default y
 	---help---
-	Provides support for detecting Accessory such as TA, Keyboard, OTG
-
 	Say Y here to get to see options for Samsung Accessories
 	If you say N, all options in this submenu will be skipped and disabled.
 
@@ -16,11 +13,26 @@ if ACCESSORY
 
 config 30PIN_CONN
         tristate "Accessory detection driver"
+        depends on I2C
+        help
+         Provides support for detecting Accessory,such as TA, Keyboard
+
+config MHL_SII9234
+    	tristate "SiI9234 MHL(Mobile HD Link) Transmitter support"
+	depends on I2C
+	---help---
+	Mobile HD Link Transmitter driver for SiI9234
 
 config SEC_KEYBOARD_DOCK
-	tristate "sec keyboard dock support"
+    	tristate "sec keyboard dock support"
 
-config CAMERON_HEALTH
-	bool "Cameron Health device support"
-	default n
+config HPD_PULL
+	tristate "HPD pull up by PMIC LDO"
+
+config SAMSUNG_MHL_9290
+	tristate "support 9290 dongle and 9292 dongle"
+
 endif # ACCESSORY
+
+
+

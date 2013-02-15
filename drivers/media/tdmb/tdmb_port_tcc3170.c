@@ -51,6 +51,7 @@
 #include "tcbd_stream_parser.h"
 #include "tcc_fic_decoder.h"
 #include "tcbd_drv_ip.h"
+#include "tcc_fic_decoder.h"
 
 #include "tcbd_hal.h"
 

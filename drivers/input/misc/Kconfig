@@ -11,6 +11,14 @@ menuconfig INPUT_MISC
 	  If unsure, say Y.
 
 if INPUT_MISC
+config SENSORS_BH1721FVC
+	tristate "ROHM BH1721FVC ambient light sensor"
+	depends on I2C
+	help
+	  Say Y here if you have ROHM BH1721FVC hooked to an I2C bus.
+
+	  This option eanbles the light sensor device driver for
+	  the ROHM BH1721FVC chip.
 
 config INPUT_88PM860X_ONKEY
 	tristate "88PM860x ONKEY support"
@@ -278,24 +286,13 @@ config INPUT_TWL4030_PWRBUTTON
 config INPUT_TWL4030_VIBRA
 	tristate "Support for TWL4030 Vibrator"
 	depends on TWL4030_CORE
-	select MFD_TWL4030_AUDIO
+	select TWL4030_CODEC
 	select INPUT_FF_MEMLESS
 	help
 	  This option enables support for TWL4030 Vibrator Driver.
 
 	  To compile this driver as a module, choose M here. The module will
 	  be called twl4030_vibra.
-
-config INPUT_TWL6040_VIBRA
-	tristate "Support for TWL6040 Vibrator"
-	depends on TWL4030_CORE
-	select TWL6040_CORE
-	select INPUT_FF_MEMLESS
-	help
-	  This option enables support for TWL6040 Vibrator Driver.
-
-	  To compile this driver as a module, choose M here. The module will
-	  be called twl6040_vibra.
 
 config INPUT_UINPUT
 	tristate "User level driver support"
@@ -320,18 +317,6 @@ config INPUT_GPIO
 	tristate "GPIO driver support"
 	help
 	  Say Y here if you want to support gpio based keys, wheels etc...
-
-config INPUT_ISA1200_FF_MEMLESS
-	tristate "ISA1200 haptic ff-memless support"
-	depends on I2C
-	select INPUT_FF_MEMLESS
-	help
-	  ISA1200 is a high performance enhanced haptic chip.
-	  Say Y here if you want to support ISA1200 connected via I2C,
-	  and select N if you are unsure.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called isa1200-ff-memless.
 
 config HP_SDC_RTC
 	tristate "HP SDC Real Time Clock"
@@ -478,7 +463,20 @@ config INPUT_ADXL34X_SPI
 	  Say Y here if you have ADXL345/6 hooked to a SPI bus.
 
 	  To compile this driver as a module, choose M here: the
-	  module will be called adxl34x-spi.
+
+config OPTICAL_GP2A
+	depends on I2C && GENERIC_GPIO
+	tristate "GP2A ambient light and proximity input device"
+	default n
+	help
+	  This option enables proximity & light sensors using gp2a driver.
+
+config OPTICAL_WAKE_ENABLE
+	depends on I2C && GENERIC_GPIO
+	tristate "Enabled ambient light and proximity to wake up gpio"
+	default n
+	help
+	  This option enables proximity & light sensors using wake up gpio.
 
 config INPUT_CMA3000
 	tristate "VTI CMA3000 Tri-axis accelerometer"
@@ -517,52 +515,17 @@ config INPUT_XEN_KBDDEV_FRONTEND
 	  To compile this driver as a module, choose M here: the
 	  module will be called xen-kbdfront.
 
-config PMIC8058_OTHC
-        tristate "Qualcomm PMIC8058 OTHC support"
-        default n
-        depends on PMIC8058
-        help
-          Say Y here if you want support PMIC8058 OTHC.
-
-          To compile this driver as a module, choose M here: the
-          module will be called pmic8058-othc.
-
-config INPUT_PMIC8058_VIBRA_MEMLESS
-	tristate "Qualcomm PM8058 vibrator support (ff-memless)"
-	depends on PMIC8058 && INPUT_FF_MEMLESS
-	default n
+config INPUT_FLIP
+        tristate "INPUT_FLIP"
 	help
-	  This option enables device driver support for the vibrator
-	  on Qualcomm PM8058 chip. This driver supports ff-memless interface
-	  from input framework.
+	  Say Y here if you want to support gpio based Flip...
 
-	  To compile this driver as module, choose M here: the
-	  module will be called pmic8058-vib-memless.
-
-config BOSCH_BMA150
-        tristate "SMB380/BMA150 acceleration sensor support"
-        depends on I2C=y
-        help
-          If you say yes here you get support for Bosch Sensortec's
-          acceleration sensors SMB380/BMA150.
-
-config INPUT_BMP180
-        depends on I2C && SYSFS
-        tristate "BMP180 digital pressure sensor"
-        help
-          If you say yes here you get support for the Bosch Sensortec
-          BMP180 digital pressure sensor.
-
-          To compile this driver as a module, choose M here: the
-           module will be called bmp180.
-
-config SEC_HALL_DMB
-	tristate "hall switch for DMB Antena"
+config INPUT_KR3DH
+	tristate "ST KR3DH accelerometer sensor"
+	depends on I2C
 	help
-		If you say yes here you get support for the
-		Hall Switch sensor for DMB antena
+	  Say Y here if you want to support for ST KR3DH accelerometer sensor.
 
-		To compile this driver as a module, choose M here: the
-		module will be called hall_sw.
-
+	  To compile this driver as a module, choose M here: the
+	  module will be called kr3dh.
 endif

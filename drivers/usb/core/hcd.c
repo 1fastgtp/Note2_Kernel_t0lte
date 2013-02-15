@@ -872,9 +872,6 @@ static void usb_bus_init (struct usb_bus *bus)
 	bus->bandwidth_isoc_reqs = 0;
 
 	INIT_LIST_HEAD (&bus->bus_list);
-#ifdef CONFIG_USB_OTG
-	INIT_DELAYED_WORK(&bus->hnp_polling, usb_hnp_polling_work);
-#endif
 }
 
 /*-------------------------------------------------------------------------*/
@@ -904,11 +901,6 @@ static int usb_register_bus(struct usb_bus *bus)
 	/* Add it to the local list of buses */
 	list_add (&bus->bus_list, &usb_bus_list);
 	mutex_unlock(&usb_bus_list_lock);
-#ifdef CONFIG_USB_OTG
-	/* Obvioulsy HNP is supported on B-host */
-	if (bus->is_b_host)
-		bus->hnp_support = 1;
-#endif
 
 	usb_notify_add_bus(bus);
 
@@ -985,10 +977,7 @@ static int register_root_hub(struct usb_hcd *hcd)
 	if (retval) {
 		dev_err (parent_dev, "can't register root hub for %s, %d\n",
 				dev_name(&usb_dev->dev), retval);
-	}
-	mutex_unlock(&usb_bus_list_lock);
-
-	if (retval == 0) {
+	} else {
 		spin_lock_irq (&hcd_root_hub_lock);
 		hcd->rh_registered = 1;
 		spin_unlock_irq (&hcd_root_hub_lock);
@@ -997,6 +986,7 @@ static int register_root_hub(struct usb_hcd *hcd)
 		if (HCD_DEAD(hcd))
 			usb_hc_died (hcd);	/* This time clean up */
 	}
+	mutex_unlock(&usb_bus_list_lock);
 
 	return retval;
 }

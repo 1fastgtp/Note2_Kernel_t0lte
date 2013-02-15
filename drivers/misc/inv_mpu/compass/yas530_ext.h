@@ -1,5 +1,5 @@
 /*
-$License:
+	$License:
 	Copyright (C) 2011 InvenSense Corporation, All Rights Reserved.
 
 	This program is free software; you can redistribute it and/or modify
@@ -24,8 +24,5 @@ $License:
 #include <linux/mpu.h>
 
 struct ext_slave_descr *yas530_ext_get_slave_descr(void);
-extern int geomagnetic_api_read(int *xyz, int *raw, int *xy1y2, int *accuracy);
-extern int geomagnetic_api_resume(void);
-extern int geomagnetic_api_suspend(void);
 
 #endif

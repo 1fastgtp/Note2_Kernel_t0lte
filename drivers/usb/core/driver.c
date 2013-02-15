@@ -1181,6 +1181,19 @@ static int usb_suspend_both(struct usb_device *udev, pm_message_t msg)
 			udev->state == USB_STATE_SUSPENDED)
 		goto done;
 
+#ifdef CONFIG_MDM_HSIC_PM
+	/* when additional device attached at ehci hub, interface driver will
+	 * goes to suspend , but hub will not goes to suspend.
+	 * in hsic case, device modem cannot notice this change on host, so
+	 * it does not try to send packet to host
+	 *
+	 * prevent suspend_both when it's parent has more child
+	 */
+	if (udev->dev.parent) {
+		if (atomic_read(&udev->dev.parent->power.child_count) != 1)
+			return -EBUSY;
+	}
+#endif
 	/* Suspend all the interfaces and then udev itself */
 	if (udev->actconfig) {
 		n = udev->actconfig->desc.bNumInterfaces;
@@ -1278,44 +1291,6 @@ static int usb_resume_both(struct usb_device *udev, pm_message_t msg)
 	return status;
 }
 
-#ifdef CONFIG_USB_OTG
-void usb_hnp_polling_work(struct work_struct *work)
-{
-	int ret;
-	struct usb_bus *bus =
-		container_of(work, struct usb_bus, hnp_polling.work);
-	struct usb_device *udev = bus->root_hub->children[bus->otg_port - 1];
-	u8 *status = kmalloc(sizeof(*status), GFP_KERNEL);
-
-	if (!status)
-		return;
-
-	ret = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
-		USB_REQ_GET_STATUS, USB_DIR_IN | USB_RECIP_DEVICE,
-		0, OTG_STATUS_SELECTOR, status, sizeof(*status),
-		USB_CTRL_GET_TIMEOUT);
-	if (ret < 0) {
-		/* Peripheral may not be supporting HNP polling */
-		dev_info(&udev->dev, "HNP polling failed. status %d\n", ret);
-		goto out;
-	}
-
-	/* Spec says host must suspend the bus with in 2 sec. */
-	if (*status & (1 << HOST_REQUEST_FLAG)) {
-		do_unbind_rebind(udev, DO_UNBIND);
-		udev->do_remote_wakeup = device_may_wakeup(&udev->dev);
-		ret = usb_suspend_both(udev, PMSG_USER_SUSPEND);
-		if (ret)
-			dev_info(&udev->dev, "suspend failed\n");
-	} else {
-		schedule_delayed_work(&bus->hnp_polling,
-			msecs_to_jiffies(THOST_REQ_POLL));
-	}
-out:
-	kfree(status);
-}
-#endif
-
 static void choose_wakeup(struct usb_device *udev, pm_message_t msg)
 {
 	int	w;
@@ -1370,6 +1345,9 @@ int usb_resume(struct device *dev, pm_message_t msg)
 	 * Unbind the interfaces that will need rebinding later.
 	 */
 	} else {
+		#ifdef CONFIG_MDM_HSIC_PM
+		pm_runtime_get_sync(dev->parent);
+		#endif
 		status = usb_resume_both(udev, msg);
 		if (status == 0) {
 			pm_runtime_disable(dev);
@@ -1377,6 +1355,9 @@ int usb_resume(struct device *dev, pm_message_t msg)
 			pm_runtime_enable(dev);
 			do_unbind_rebind(udev, DO_REBIND);
 		}
+		#ifdef CONFIG_MDM_HSIC_PM
+		pm_runtime_put_sync(dev->parent);
+		#endif
 	}
 
 	/* Avoid PM error messages for devices disconnected while suspended

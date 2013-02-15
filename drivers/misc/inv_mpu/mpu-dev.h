@@ -34,10 +34,9 @@ void inv_mpu_unregister_slave(struct i2c_client *client,
 			struct ext_slave_platform_data *pdata,
 			struct ext_slave_descr *(*slave_descr)(void));
 
-extern struct class *sec_class;
+extern signed short gAccelOffset[3];
 extern struct class *sensors_class;
 extern int sensors_register(struct device *dev, void * drvdata,
-	struct device_attribute *attributes[], char *name);
-/* extern signed short gAccelOffset[3];*/
+		struct device_attribute *attributes[], char *name);
 
 #endif

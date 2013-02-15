@@ -12,7 +12,7 @@ menuconfig RTC_CLASS
 	select RTC_LIB
 	help
 	  Generic RTC class support. If you say yes here, you will
- 	  be allowed to plug one or more RTCs to your system. You will
+	  be allowed to plug one or more RTCs to your system. You will
 	  probably want to enable one or more of the interfaces below.
 
 if RTC_CLASS
@@ -94,23 +94,6 @@ config RTC_INTF_DEV
 
 	  If unsure, say Y.
 
-config RTC_INTF_ALARM
-	bool "Android alarm driver"
-	depends on RTC_CLASS
-	default y
-	help
-	  Provides non-wakeup and rtc backed wakeup alarms based on rtc or
-	  elapsed realtime, and a non-wakeup alarm on the monotonic clock.
-	  Also provides an interface to set the wall time which must be used
-	  for elapsed realtime to work.
-
-config RTC_INTF_ALARM_DEV
-	bool "Android alarm device"
-	depends on RTC_INTF_ALARM
-	default y
-	help
-	  Exports the alarm interface to user-space.
-
 config RTC_INTF_DEV_UIE_EMUL
 	bool "RTC UIE emulation on dev interface"
 	depends on RTC_INTF_DEV
@@ -140,6 +123,26 @@ config RTC_INTF_ALARM_DEV
 	help
 	  Exports the alarm interface to user-space.
 
+config RTC_ALARM_BOOT
+	bool "Android alarm boot function"
+	depends on RTC_INTF_ALARM
+	default n
+	help
+	  This is for alarm booting function. This feature is only used in
+	  Chinese models. When the handset power off after setting alarm
+	  time with checking auto power up menu, the handset must be powered
+	  on in time automatically.
+
+config RTC_POWER_OFF
+	bool "Power off alarm function"
+	depends on RTC_INTF_ALARM
+	default n
+	help
+	  This is only for S project power off alarm. When the handset going to
+	  fake power off state, all wakeup sources are blocked,
+	  except pwr-key and RTC_POWER_OFF.
+	  At the time you will set power off time, rtc wakeup the device
+	  and run the power off process.
 
 config RTC_DRV_TEST
 	tristate "Test driver/device"
@@ -246,7 +249,37 @@ config RTC_DRV_MAX8998
 	  RTC of Maxim MAX8998 PMIC.
 
 	  This driver can also be built as a module. If so, the module
+
+config RTC_DRV_MAX8997
+	tristate "Maxim MAX8997"
+	depends on MFD_MAX8997
+	help
+	  If you say yes here you will get support for the
+	  RTC of Maxim MAX8997 PMIC.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called rtc-max8997.
+
+config RTC_DRV_MAX77686
+	tristate "Maxim MAX77686"
+	depends on MFD_MAX77686
+	help
+	  If you say yes here you will get support for the
+	  RTC of Maxim MAX77686 PMIC.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called rtc-max77686.
 	  will be called rtc-max8998.
+
+config RTC_DRV_MAX77686
+	tristate "Maxim MAX77686"
+	depends on MFD_MAX77686
+	help
+	  If you say yes here you will get support for the
+	  RTC of Maxim MAX77686 PMIC.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called rtc-max77686.
 
 config RTC_DRV_RS5C372
 	tristate "Ricoh R2025S/D, RS5C372A/B, RV5C386, RV5C387A"
@@ -413,6 +446,16 @@ config RTC_DRV_RV3029C2
 
 	  This driver can also be built as a module. If so, the module
 	  will be called rtc-rv3029c2.
+
+config RTC_DRV_S5M
+	tristate "Samsung S5M series"
+	depends on MFD_S5M_CORE
+	help
+	  If you say yes here you will get support for the
+	  RTC of Samsung S5M series.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called rtc-s5m.
 
 endif # I2C
 
@@ -756,37 +799,6 @@ config RTC_DRV_NUC900
 
 comment "on-CPU RTC drivers"
 
-config RTC_DRV_MSM
-	tristate "RTC on Qualcomm Chipsets"
-	depends on ARCH_MSM
-	default y
-	help
-	  RTC driver for Qualcomm chipsets
-
-
-config RTC_SECURE_TIME_SUPPORT
-        bool "Support for secure time on Qualcomm Chipsets"
-        depends on RTC_DRV_MSM = y
-        default y
-        help
-          Say yes here to have additional handle for reading secure time
-          maintained by ARM9.
-
-config RTC_ASYNC_MODEM_SUPPORT
-	bool "Support for time update on async modem boot"
-        depends on RTC_DRV_MSM && (ARCH_MSM8X60 || ARCH_QSD8X50)
-	default n
-	help
-	 Say yes here to have the system time updated if there is
-	 an asynchronous MODEM boot.
-
-config RTC_DRV_MSM7X00A
-	tristate "MSM7X00A"
-	depends on ARCH_MSM
-	default n
-	help
-	  RTC driver for Qualcomm MSM7K chipsets
-
 config RTC_DRV_DAVINCI
 	tristate "TI DaVinci RTC"
 	depends on ARCH_DAVINCI_DM365
@@ -796,13 +808,6 @@ config RTC_DRV_DAVINCI
 
 	  This driver can also be built as a module. If so, the module
 	  will be called rtc-davinci.
-
-config RTC_DRV_MSM7X00A
-	tristate "MSM7X00A"
-	depends on ARCH_MSM
-	default y
-	help
-	  RTC driver for Qualcomm MSM7K chipsets
 
 config RTC_DRV_OMAP
 	tristate "TI OMAP1"
@@ -862,7 +867,7 @@ config RTC_DRV_SH
 	  Say Y here to enable support for the on-chip RTC found in
 	  most SuperH processors.
 
- 	  To compile this driver as a module, choose M here: the
+	  To compile this driver as a module, choose M here: the
 	  module will be called rtc-sh.
 
 config RTC_DRV_VR41XX
@@ -1132,14 +1137,5 @@ config RTC_DRV_PUV3
 
 	  This drive can also be built as a module. If so, the module
 	  will be called rtc-puv3.
-
-config RTC_DRV_PM8XXX
-	tristate "Qualcomm PMIC8XXX RTC"
-	depends on MFD_PM8XXX
-	help
-	  Say Y here if you want to support the Qualcomm PMIC8XXX RTC.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called rtc-pm8xxx.
 
 endif # RTC_CLASS

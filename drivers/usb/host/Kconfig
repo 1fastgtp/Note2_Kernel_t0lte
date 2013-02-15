@@ -19,7 +19,7 @@ config USB_C67X00_HCD
 
 config USB_XHCI_HCD
 	tristate "xHCI HCD (USB 3.0) support (EXPERIMENTAL)"
-	depends on USB && PCI && EXPERIMENTAL
+	depends on USB && USB_ARCH_HAS_XHCI && EXPERIMENTAL
 	---help---
 	  The eXtensible Host Controller Interface (xHCI) is standard for USB 3.0
 	  "SuperSpeed" host controller hardware.
@@ -36,6 +36,12 @@ config USB_XHCI_HCD_DEBUGGING
 	  This should only be used for debugging xHCI driver bugs.
 
 	  If unsure, say N.
+
+config USB_XHCI_EXYNOS
+	boolean "EXYNOS XHCI support"
+	depends on USB_XHCI_HCD && ARCH_EXYNOS
+	help
+	 Enable support for the EXYNOS SOC's on-chip XHCI controller.
 
 config USB_EHCI_HCD
 	tristate "EHCI HCD (USB 2.0) support"
@@ -58,19 +64,6 @@ config USB_EHCI_HCD
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called ehci-hcd.
-
-config USB_EHCI_EHSET
-	bool "Embedded High-speed Host Electrical Test Support"
-	depends on USB_EHCI_HCD
-	---help---
-	  This option is required for EHSET Host Compliance Tests support on an
-	  embedded Hi-speed USB Host or OTG port.
-
-	  This enables the software support for the "Single Step Set Featue" test.
-	  Apart from this test, other EHSET tests TEST_SE0/J/K/PACKET are part
-	  of EHCI specification and their support already exists in the EHCI driver.
-
-	  If unsure, say N.
 
 config USB_EHCI_ROOT_HUB_TT
 	bool "Root Hub Transaction Translators"
@@ -202,10 +195,24 @@ config USB_EHCI_SH
 	  If you use the PCI EHCI controller, this option is not necessary.
 
 config USB_EHCI_S5P
-       boolean "S5P EHCI support"
-       depends on USB_EHCI_HCD && PLAT_S5P
-       help
+	boolean "S5P EHCI support"
+	depends on USB_EHCI_HCD && PLAT_S5P
+	help
 	 Enable support for the S5P SOC's on-chip EHCI controller.
+
+config USB_S5P_HSIC0
+	boolean "S5P HSIC0 support"
+	depends on USB_EHCI_HCD && PLAT_S5P && USB_EHCI_S5P
+	default y
+	help
+	 Enable support for the S5P SOC's on-chip HSIC PHY.
+
+config USB_S5P_HSIC1
+	boolean "S5P HSIC1 support"
+	depends on USB_EHCI_HCD && PLAT_S5P && USB_EHCI_S5P
+	default y
+	help
+	 Enable support for the S5P SOC's on-chip HSIC PHY.
 
 config USB_W90X900_EHCI
 	bool "W90X900(W90P910) EHCI support"
@@ -242,22 +249,6 @@ config USB_OXU210HP_HCD
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called oxu210hp-hcd.
-
-config USB_EHCI_MSM_72K
-	bool "Support for Legacy Qualcomm on-chip EHCI USB controller"
-	depends on USB_EHCI_HCD && USB_MSM_OTG_72K && ARCH_MSM
-	---help---
-	  This driver enables support for USB host controller
-	  in pre 8660 qualcomm chipsets(8660, 7X30, 8X50 and 7X27).
-
-config USB_FS_HOST
-	bool "Support for Full Speed Host Mode"
-	depends on USB_EHCI_MSM_72K && ARCH_QSD8X50
-	default n
-	---help---
-	  Enables support for the full speed USB controller core present
-	  on the Qualcomm chipsets
-
 
 config USB_ISP116X_HCD
 	tristate "ISP116X HCD support"
@@ -399,6 +390,12 @@ config USB_OHCI_SH
 	---help---
 	  Enables support for the on-chip OHCI controller on the SuperH.
 	  If you use the PCI OHCI controller, this option is not necessary.
+
+config USB_OHCI_S5P
+	boolean "S5P OHCI support"
+	depends on USB_OHCI_HCD && PLAT_S5P
+	help
+	 Enable support for the S5P SOC's on-chip OHCI controller.
 
 config USB_CNS3XXX_OHCI
 	bool "Cavium CNS3XXX OHCI Module"
@@ -557,15 +554,6 @@ config USB_WHCI_HCD
 	  To compile this driver a module, choose M here: the module
 	  will be called "whci-hcd".
 
-config USB_PEHCI_HCD
-	tristate "ST-E ISP1763A Host Controller"
-	depends on USB
-	help
-	  Driver for ST-E isp1763A USB Host 2.0 Controllers.
-
-	  To compile this driver a module, choose M here: the module
-	  will be called "pehci".
-
 config USB_HWA_HCD
 	tristate "Host Wire Adapter (HWA) driver (EXPERIMENTAL)"
 	depends on EXPERIMENTAL
@@ -616,3 +604,18 @@ config USB_OCTEON_OHCI
 config USB_OCTEON2_COMMON
 	bool
 	default y if USB_OCTEON_EHCI || USB_OCTEON_OHCI
+
+config USB_S3C_OTG_HOST
+        tristate "S3C USB OTG Host support"
+        depends on USB && (PLAT_S3C64XX || PLAT_S5P)
+        help
+          Samsung's S3C64XX processors include high speed USB OTG2.0
+          controller. It has 15 configurable endpoints, as well as
+          endpoint zero (for control transfers).
+
+          This driver support only OTG Host role. If you want to use
+          OTG Device role, select USB Gadget support and S3C OTG Device.
+
+          Say "y" to link the driver statically, or "m" to build a
+          dynamically linked module called "s3c_otg_hcd" and force all
+          drivers to also be dynamically linked.

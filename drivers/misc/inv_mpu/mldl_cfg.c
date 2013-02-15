@@ -47,17 +47,7 @@
 #define WAKE_UP 7
 #define RESET   1
 #define STANDBY 1
-#define FEATURE_REDUCE_DMPTIME
 
-struct motion_int_data {
-	unsigned char pwr_mnt[2];
-	unsigned char cfg;
-	unsigned char accel_cfg;
-	unsigned char int_cfg;
-	bool is_set;
-};
-
-static struct motion_int_data motion_int_data;
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -232,7 +222,7 @@ static int mpu6050b1_set_i2c_bypass(struct mldl_cfg *mldl_cfg,
 			 * 2.97 ms minimum @ 100kbps
 			 * 0.75 ms minimum @ 400kbps.
 			 *****************************************/
-			mdelay(3);
+			msleep(20);
 		}
 		result = inv_serial_single_write(
 			mlsl_handle, mldl_cfg->mpu_chip_info->addr,
@@ -335,8 +325,7 @@ static struct prod_rev_map_t prod_rev_map[] = {
 	{MPL_PROD_KEY(7, 19), MPU_SILICON_REV_B1, 131, 16384},  /* (B5/E2)   */
 	/* prod_ver = 8 */
 	{MPL_PROD_KEY(8, 19), MPU_SILICON_REV_B1, 131, 16384},   /* (B5/E2)   */
-	{MPL_PROD_KEY(40, 19), MPU_SILICON_REV_B1, 131, 16384},  /* (B5/E2)   */
-	{MPL_PROD_KEY(41, 19), MPU_SILICON_REV_B1, 131, 16384}   /* (B5/E2)   */
+	{MPL_PROD_KEY(40, 19), MPU_SILICON_REV_B1, 131, 16384}   /* (B5/E2)   */
 };
 
 /**
@@ -349,7 +338,7 @@ static struct prod_rev_map_t prod_rev_map[] = {
 short index_of_key(unsigned short key)
 {
 	int i;
-	printk(KERN_INFO "%s\n", __func__);
+	pr_info("%s", __func__);
 	for (i = 0; i < NUM_OF_PROD_REVS; i++)
 		if (prod_rev_map[i].mpl_product_key == key)
 			return (short)i;
@@ -384,6 +373,7 @@ static int inv_get_silicon_rev_mpu6050(
 	    (BIT_PRFTCH_EN | BIT_CFG_USER_BANK | MPU_MEM_OTP_BANK_0);
 	unsigned short memAddr = ((bank << 8) | 0x06);
 	unsigned short key;
+	short index;
 	struct mpu_chip_info *mpu_chip_info = mldl_cfg->mpu_chip_info;
 
 	result = inv_serial_read(mlsl_handle, mldl_cfg->mpu_chip_info->addr,
@@ -417,15 +407,24 @@ static int inv_get_silicon_rev_mpu6050(
 			 "incompatible or an MPU3050\n");
 		return INV_ERROR_INVALID_MODULE;
 	}
+	pr_info("%s key=%d", __func__, key);
+	index = index_of_key(key);
+	if (index == -1 || index >= NUM_OF_PROD_REVS) {
+		MPL_LOGE("Unsupported product key %d in MPL\n", key);
+		return INV_ERROR_INVALID_MODULE;
+	}
+	/* check MPL is compiled for this device */
+	if (prod_rev_map[index].silicon_rev != MPU_SILICON_REV_B1) {
+		MPL_LOGE("MPL compiled for MPU6050B1 support "
+			 "but device is not MPU6050B1 (%d)\n", key);
+		return INV_ERROR_INVALID_MODULE;
+	}
 
 	mpu_chip_info->product_id = prod_ver;
 	mpu_chip_info->product_revision = prod_rev;
-	mpu_chip_info->silicon_revision = MPU_SILICON_REV_B1;
-	mpu_chip_info->gyro_sens_trim = 131;
-	mpu_chip_info->accel_sens_trim = 16384;
-
-	if (prod_ver == 4)
-		mpu_chip_info->accel_sens_trim = 8192;
+	mpu_chip_info->silicon_revision = prod_rev_map[index].silicon_rev;
+	mpu_chip_info->gyro_sens_trim = prod_rev_map[index].gyro_trim;
+	mpu_chip_info->accel_sens_trim = prod_rev_map[index].accel_trim;
 
 	return result;
 }
@@ -516,7 +515,7 @@ static int mpu60xx_pwr_mgmt(struct mldl_cfg *mldl_cfg,
 			return result;
 		}
 		mldl_cfg->inv_mpu_state->status &= ~MPU_GYRO_IS_BYPASSED;
-		msleep(100);
+		msleep(20);
 	}
 
 	/* NOTE : reading both PWR_MGMT_1 and PWR_MGMT_2 for efficiency because
@@ -968,9 +967,7 @@ int inv_mpu_set_firmware(struct mldl_cfg *mldl_cfg, void *mlsl_handle,
 {
 	int bank, offset, write_size;
 	int result;
-#ifndef FEATURE_REDUCE_DMPTIME
 	unsigned char read[MPU_MEM_BANK_SIZE];
-#endif
 
 	if (mldl_cfg->inv_mpu_state->status & MPU_DEVICE_IS_SUSPENDED) {
 #if INV_CACHE_DMP == 1
@@ -1005,7 +1002,7 @@ int inv_mpu_set_firmware(struct mldl_cfg *mldl_cfg, void *mlsl_handle,
 			MPL_LOGE("Write mem error in bank %d\n", bank);
 			return result;
 		}
-#ifndef FEATURE_REDUCE_DMPTIME
+#if 0
 		result = inv_serial_read_mem(mlsl_handle,
 				mldl_cfg->mpu_chip_info->addr,
 				((bank << 8) | 0x00),
@@ -1038,31 +1035,6 @@ int inv_mpu_set_firmware(struct mldl_cfg *mldl_cfg, void *mlsl_handle,
 	return INV_SUCCESS;
 }
 
-static int set_fp_mode(struct mldl_cfg *mldl_cfg, void *gyro_handle)
-{
-	unsigned char b;
-	int result = INV_SUCCESS;
-
-	/* Resetting the cycle bit and LPA wake up freq */
-	inv_serial_read(gyro_handle, mldl_cfg->mpu_chip_info->addr,
-		MPUREG_PWR_MGMT_1, 1, &b);
-
-	if (b & BIT_CYCLE) {
-		b &= ~BIT_CYCLE & ~BIT_PD_PTAT;
-		result |= inv_serial_single_write(gyro_handle,
-			mldl_cfg->mpu_chip_info->addr,
-			MPUREG_PWR_MGMT_1, b);
-		inv_serial_read(gyro_handle, mldl_cfg->mpu_chip_info->addr,
-			MPUREG_PWR_MGMT_2, 1, &b);
-		b &= ~BITS_LPA_WAKE_CTRL;
-		result |= inv_serial_single_write(gyro_handle,
-			mldl_cfg->mpu_chip_info->addr,
-			MPUREG_PWR_MGMT_2, b);
-	}
-
-	return result;
-}
-
 static int gyro_resume(struct mldl_cfg *mldl_cfg, void *gyro_handle,
 		       unsigned long sensors)
 {
@@ -1070,11 +1042,6 @@ static int gyro_resume(struct mldl_cfg *mldl_cfg, void *gyro_handle,
 	int ii;
 	unsigned char reg;
 	unsigned char regs[7];
-	unsigned char int_cfg = mldl_cfg->mpu_gyro_cfg->int_config;
-
-	result = set_fp_mode(mldl_cfg, gyro_handle);
-	if (result)
-		LOG_RESULT_LOCATION(result);
 
 	/* Wake up the part */
 	result = mpu60xx_pwr_mgmt(mldl_cfg, gyro_handle, false, sensors);
@@ -1085,12 +1052,9 @@ static int gyro_resume(struct mldl_cfg *mldl_cfg, void *gyro_handle,
 
 	/* Always set the INT_ENABLE and DIVIDER as the Accel Only mode for 6050
 	   can set these too */
-	if (mldl_cfg->inv_mpu_state->accel_reactive)
-		int_cfg |= 0x40;
-
 	result = inv_serial_single_write(
 		gyro_handle, mldl_cfg->mpu_chip_info->addr,
-		MPUREG_INT_ENABLE, int_cfg);
+		MPUREG_INT_ENABLE, (mldl_cfg->mpu_gyro_cfg->int_config));
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
@@ -1098,8 +1062,6 @@ static int gyro_resume(struct mldl_cfg *mldl_cfg, void *gyro_handle,
 	result = inv_serial_single_write(
 		gyro_handle, mldl_cfg->mpu_chip_info->addr,
 		MPUREG_SMPLRT_DIV, mldl_cfg->mpu_gyro_cfg->divider);
-	pr_info("mpu6050_gyro_resume: %d, result %d\n",
-		mldl_cfg->mpu_gyro_cfg->divider, result);
 	if (result) {
 		LOG_RESULT_LOCATION(result);
 		return result;
@@ -1424,8 +1386,6 @@ int inv_mpu_open(struct mldl_cfg *mldl_cfg,
 		MPU_PRESSURE_IS_SUSPENDED |
 		MPU_DEVICE_IS_SUSPENDED;
 	mldl_cfg->inv_mpu_state->i2c_slaves_enabled = 0;
-	mldl_cfg->inv_mpu_state->accel_reactive = false;
-	mldl_cfg->inv_mpu_state->use_accel_reactive = false;
 
 	slave_handle[EXT_SLAVE_TYPE_GYROSCOPE] = gyro_handle;
 	slave_handle[EXT_SLAVE_TYPE_ACCEL] = accel_handle;
@@ -1527,98 +1487,6 @@ int inv_mpu_close(struct mldl_cfg *mldl_cfg,
 	return 0;
 }
 
-static int inv_mpu_lp_mode(void *mlsl_handle,
-			   struct ext_slave_platform_data *pdata, int enable)
-{
-	unsigned char data;
-	int result = 0;
-	struct motion_int_data *mot_data = &motion_int_data;
-	pr_info("%s set lp mode: %d\n", __func__, enable);
-	if (enable) {
-		inv_serial_read(mlsl_handle, pdata->address,
-				MPUREG_PWR_MGMT_1, 2,
-				mot_data->pwr_mnt);
-		inv_serial_read(mlsl_handle, pdata->address,
-				MPUREG_CONFIG, 1, &mot_data->cfg);
-		inv_serial_read(mlsl_handle, pdata->address,
-				MPUREG_ACCEL_CONFIG, 1,
-				&mot_data->accel_cfg);
-		inv_serial_read(mlsl_handle, pdata->address,
-				MPUREG_INT_ENABLE, 1,
-				&mot_data->int_cfg);
-
-		/* initialize */
-		data = 0x01;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_PWR_MGMT_1, data);
-		msleep(50);
-		/* mpu& accel config */
-		data = mot_data->cfg;
-		data &= 0xF8;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_CONFIG, data);
-		data = mot_data->accel_cfg;
-		data &= 0xF8;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_ACCEL_CONFIG, data);
-		/* 3) set motion thr & dur */
-		data = 0x40;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_INT_ENABLE, data);
-		data = 0x02;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_ACCEL_MOT_DUR, data);
-		data = 0x5;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_ACCEL_MOT_THR, data);
-		/* set HPF */
-		usleep_range(5000, 5000);
-		data = 0x7;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_ACCEL_CONFIG, data);
-
-		/* Steps to setup the lower power mode for PWM-2 register */
-		data = mot_data->pwr_mnt[1];
-		data |= (BITS_LPA_WAKE_10HZ);
-		data |= 0x07;
-		data &= ~(BIT_STBY_ZA);
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_PWR_MGMT_2, data);
-		data = mot_data->pwr_mnt[0];
-		data |= 0x20;	 /* Set the cycle bit to be 1. LOW POWER MODE */
-		data &= ~0x08;	/* Clear the temp disp bit. */
-		inv_serial_single_write(mlsl_handle, pdata->address,
-			MPUREG_PWR_MGMT_1, data & ~BIT_SLEEP);
-	} else {
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_CONFIG, mot_data->cfg);
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_ACCEL_CONFIG,
-					mot_data->accel_cfg);
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_INT_ENABLE,
-					mot_data->int_cfg);
-		data = 0xff;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_ACCEL_MOT_DUR, data);
-		data = 0xff;
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_ACCEL_MOT_THR, data);
-		inv_serial_read(mlsl_handle, pdata->address,
-				MPUREG_INT_ENABLE, 1, &data);
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_PWR_MGMT_1,
-					mot_data->pwr_mnt[0]);
-		inv_serial_single_write(mlsl_handle, pdata->address,
-					MPUREG_PWR_MGMT_2,
-					mot_data->pwr_mnt[1]);
-	}
-
-	mot_data->is_set = enable;
-
-	return result;
-}
-
 /**
  *  @brief  resume the MPU device and all the other sensor
  *          devices from their low power state.
@@ -1685,7 +1553,6 @@ int inv_mpu_resume(struct mldl_cfg *mldl_cfg,
 	slave_handle[EXT_SLAVE_TYPE_ACCEL] = accel_handle;
 	slave_handle[EXT_SLAVE_TYPE_COMPASS] = compass_handle;
 	slave_handle[EXT_SLAVE_TYPE_PRESSURE] = pressure_handle;
-	pr_info("Sensors set: %x\n", sensors);
 
 	mldl_print_cfg(mldl_cfg);
 
@@ -1761,7 +1628,6 @@ int inv_mpu_resume(struct mldl_cfg *mldl_cfg,
 			}
 		}
 	}
-
 	/* Turn on the master i2c iterface if necessary */
 	if (resume_dmp) {
 		result = mpu_set_i2c_bypass(
@@ -1835,7 +1701,7 @@ int inv_mpu_suspend(struct mldl_cfg *mldl_cfg,
 	bool suspend_dmp = ((sensors & INV_DMP_PROCESSOR) == INV_DMP_PROCESSOR);
 	bool suspend_slave[EXT_SLAVE_NUM_TYPES];
 	void *slave_handle[EXT_SLAVE_NUM_TYPES];
-	pr_info("Sensors unset: %x\n", sensors);
+
 	suspend_slave[EXT_SLAVE_TYPE_GYROSCOPE] =
 		((sensors & (INV_X_GYRO | INV_Y_GYRO | INV_Z_GYRO))
 			== (INV_X_GYRO | INV_Y_GYRO | INV_Z_GYRO));
@@ -1918,13 +1784,6 @@ int inv_mpu_suspend(struct mldl_cfg *mldl_cfg,
 		}
 	}
 	mldl_cfg->inv_mpu_cfg->requested_sensors = (~sensors) & INV_ALL_SENSORS;
-
-	if (mldl_cfg->inv_mpu_state->accel_reactive &&
-		!mldl_cfg->inv_mpu_cfg->requested_sensors) {
-		inv_mpu_lp_mode(gyro_handle,
-				mldl_cfg->pdata_slave[EXT_SLAVE_TYPE_ACCEL],
-				true);
-	}
 
 	return result;
 }

@@ -46,11 +46,11 @@ choice
 	depends on TDMB && TDMB_VENDOR_INC
 	prompt "chip"
 	default TDMB_T39F0
-config TDMB_T39F0
+	config TDMB_T39F0
 		bool "T39F0"
-config TDMB_T3900
+	config TDMB_T3900
 		bool "T3900"
-config TDMB_T3700
+	config TDMB_T3700
 		bool "T3700"
 	config TDMB_T3300
 		bool "T3300"
@@ -83,3 +83,7 @@ endchoice
 config TDMB_SIMUL
 	depends on TDMB
 	bool "Simulation"
+
+config TDMB_ANT_DET
+	depends on TDMB
+	bool "tdmb antenna detector"

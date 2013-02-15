@@ -8,7 +8,6 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -19,8 +18,12 @@
 #include <linux/mfd/max77693.h>
 #include <linux/mfd/max77693-private.h>
 #include <linux/leds-max77693.h>
-#include <linux/delay.h>
-#include <mach/gpio.h>
+#include <linux/ctype.h>
+
+#ifdef CONFIG_LEDS_SWITCH
+#include <linux/gpio.h>
+#define FLASH_SWITCH_REMOVED_REVISION	0x05
+#endif
 
 struct max77693_led_data {
 	struct led_classdev led;
@@ -76,7 +79,8 @@ static u8 led_current_shift[MAX77693_LED_MAX] = {
 	4,
 };
 
-static int max77693_led_torch_en;
+extern struct class *camera_class; /*sys/class/camera*/
+struct device *flash_dev;
 
 static int max77693_set_bits(struct i2c_client *client, const u8 reg,
 			     const u8 mask, const u8 inval)
@@ -109,18 +113,20 @@ static void print_all_reg_value(struct i2c_client *client)
 static int max77693_led_get_en_value(struct max77693_led_data *led_data, int on)
 {
 	if (on)
-		return 0x03;
+		return 0x03; /*triggered via serial interface*/
 
+#if 0
 	if (led_data->data->cntrl_mode == MAX77693_LED_CTRL_BY_I2C)
 		return 0x00;
-	else if (led_data->data->id < 2)
-		return 0x01;
+#endif
+
+	if (led_data->data->id < 2)
+		return 0x01; /*Flash triggered via FLASHEN*/
 	else
-		return 0x02;
+		return 0x02; /*Torch triggered via TORCHEN*/
 }
 
-static void max77693_led_set(struct led_classdev *led_cdev,
-				  enum led_brightness value)
+static void max77693_led_set(struct led_classdev *led_cdev, enum led_brightness value)
 {
 	unsigned long flags;
 	struct max77693_led_data *led_data
@@ -129,7 +135,7 @@ static void max77693_led_set(struct led_classdev *led_cdev,
 	pr_debug("[LED] %s\n", __func__);
 
 	spin_lock_irqsave(&led_data->value_lock, flags);
-	led_data->test_brightness = min_t(int, value, MAX77693_FLASH_IOUT1);
+	led_data->test_brightness = min((int)value, MAX77693_FLASH_IOUT1);
 	spin_unlock_irqrestore(&led_data->value_lock, flags);
 
 	schedule_work(&led_data->work);
@@ -143,7 +149,8 @@ static void led_set(struct max77693_led_data *led_data)
 	u8 shift = led_current_shift[id];
 	int value;
 
-	if (led_data->test_brightness == LED_OFF) {
+	if (led_data->test_brightness == LED_OFF)
+	{
 		value = max77693_led_get_en_value(led_data, 0);
 		ret = max77693_set_bits(led_data->i2c,
 					MAX77693_LED_REG_FLASH_EN,
@@ -168,18 +175,11 @@ static void led_set(struct max77693_led_data *led_data)
 	if (unlikely(ret))
 		goto error_set_bits;
 
-	/* Turn off LED */
-	value = max77693_led_get_en_value(led_data, 0);
+	/* Turn on LED */
+	value = max77693_led_get_en_value(led_data, 1);
 	ret = max77693_set_bits(led_data->i2c, MAX77693_LED_REG_FLASH_EN,
 				led_en_mask[id],
 				value << led_en_shift[id]);
-
-	if (unlikely(ret))
-		goto error_set_bits;
-
-	/* Turn on LED */
-	ret = max77693_set_bits(led_data->i2c, MAX77693_LED_REG_FLASH_EN,
-				led_en_mask[id], led_en_mask[id]);
 
 	if (unlikely(ret))
 		goto error_set_bits;
@@ -216,7 +216,7 @@ static int max77693_led_setup(struct max77693_led_data *led_data)
 	ret |= max77693_write_reg(led_data->i2c, MAX77693_LED_REG_VOUT_FLASH1,
 				  MAX77693_BOOST_VOUT_FLASH_FROM_VOLT(5000));
 	ret |= max77693_write_reg(led_data->i2c,
-				MAX77693_LED_REG_MAX_FLASH1, 0xEC);
+				MAX77693_LED_REG_MAX_FLASH1, 0x80);
 	ret |= max77693_write_reg(led_data->i2c,
 				MAX77693_LED_REG_MAX_FLASH2, 0x00);
 
@@ -232,7 +232,7 @@ static int max77693_led_setup(struct max77693_led_data *led_data)
 					(data->timer | data->timer_mode << 7));
 	} else {
 		ret |= max77693_write_reg(led_data->i2c, reg_led_timer[id],
-					0xC0);
+					0x40);
 	}
 
 	/* Set current */
@@ -243,104 +243,33 @@ static int max77693_led_setup(struct max77693_led_data *led_data)
 	return ret;
 }
 
-static void max77693_led_setPower(int onoff, int level)
+static ssize_t max77693_flash(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
 {
-	int i;
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	ssize_t ret = -EINVAL;
+	char *after;
+	unsigned long state = simple_strtoul(buf, &after, 10);
+	size_t count = after - buf;
 
-	if (unlikely(!max77693_led_torch_en)) {
-		pr_err("Failed to max77693_led_setPower !\n");
-		return;
+	if (isspace(*after))
+		count++;
+
+	if (count == size) {
+		ret = count;
+
+		if (state > led_cdev->max_brightness)
+			state = led_cdev->max_brightness;
+		led_cdev->brightness = state;
+		if (!(led_cdev->flags & LED_SUSPENDED))
+			led_cdev->brightness_set(led_cdev, state);
 	}
 
-	gpio_set_value(max77693_led_torch_en, 0);
-
-	udelay(10);
-	if (onoff) {
-		gpio_set_value(max77693_led_torch_en, 1);
-		for (i = 1; i < level; i++) {
-			udelay(1);
-			gpio_set_value(max77693_led_torch_en, 0);
-			udelay(1);
-			gpio_set_value(max77693_led_torch_en, 1);
-		}
-	}
-
-	return;
+	return ret;
 }
 
-static ssize_t max77693_led_file_cmd_store(struct device *dev,
-			struct device_attribute *attr,
-			const char *buf, size_t count)
-{
-	int brightness = 0;
-
-	pr_debug("[%s] buf[0] %d, count %d", __func__, buf[0], count);
-
-	if (count == 1)
-		brightness = (int) (buf[0] - 0x30);
-	else if (count == 2) {
-		brightness = brightness + (int) (buf[0] - 0x30) * 10;
-		brightness = brightness + (int) (buf[1] - 0x30);
-	} else {
-		pr_err("data is too long!");
-		return count;
-	}
-
-	if (brightness < 0 || brightness >= MAX_TORCH_DRV_LEVEL) {
-		pr_err("brightness data is wrong! %d", brightness);
-		return count;
-	}
-
-	if (brightness == 0)
-		max77693_led_setPower(0, 0);
-	else
-		max77693_led_setPower(1, brightness);
-
-	return count;
-}
-
-
-static DEVICE_ATTR(flash_power, S_IRUGO | S_IWUSR | S_IWGRP,
-		NULL, max77693_led_file_cmd_store);
-
-
-void max77693_led_create_node(struct max77693_led_platform_data *pdata)
-{
-	pdata->led_class = class_create(THIS_MODULE, "flash");
-
-	if (IS_ERR(pdata->led_class)) {
-		pr_err("Failed to create class(camera)!\n");
-		return;
-	}
-
-	pdata->led_dev = device_create(pdata->led_class, NULL,
-		0, NULL, "flash");
-
-	if (IS_ERR(pdata->led_dev)) {
-		pr_err("Failed to create cam_dev_back device!\n");
-		goto OUT2;
-	}
-
-	if (device_create_file(pdata->led_dev, &dev_attr_flash_power) < 0) {
-		pr_err("Failed to create device file!(%s)!\n",
-			dev_attr_flash_power.attr.name);
-		goto OUT1;
-	}
-
-	return;
-
-OUT1:
-	device_destroy(pdata->led_class, 0);
-OUT2:
-	return;
-}
-
-void max77693_led_remove_node(struct max77693_led_platform_data *pdata)
-{
-	device_remove_file(pdata->led_dev, &dev_attr_flash_power);
-	device_destroy(pdata->led_class, 0);
-	class_destroy(pdata->led_class);
-}
+static DEVICE_ATTR(rear_flash, S_IWUSR|S_IWGRP|S_IROTH,
+	NULL, max77693_flash);
 
 static int max77693_led_probe(struct platform_device *pdev)
 {
@@ -388,7 +317,7 @@ static int max77693_led_probe(struct platform_device *pdev)
 		led_data->led.brightness_set = max77693_led_set;
 		led_data->led.brightness = LED_OFF;
 		led_data->brightness = data->brightness;
-		led_data->led.flags = LED_CORE_SUSPENDRESUME;
+		led_data->led.flags = 0;
 		led_data->led.max_brightness = data->id < 2
 			? MAX_FLASH_DRV_LEVEL : MAX_TORCH_DRV_LEVEL;
 
@@ -407,6 +336,7 @@ static int max77693_led_probe(struct platform_device *pdev)
 		ret = max77693_led_setup(led_data);
 		if (unlikely(ret)) {
 			pr_err("unable to register LED\n");
+			mutex_destroy(&led_data->lock);
 			led_classdev_unregister(&led_data->led);
 			kfree(led_data);
 			ret = -EFAULT;
@@ -414,22 +344,29 @@ static int max77693_led_probe(struct platform_device *pdev)
 	}
 	/* print_all_reg_value(max77693->i2c); */
 
-	if (pdata->hw_init)
-		pdata->hw_init();	/* important */
+	flash_dev = device_create(camera_class, NULL, 0, led_datas[2], "flash");
+	if (flash_dev < 0)
+		pr_err("Failed to create device(flash)!\n");
 
-	max77693_led_torch_en = pdata->torch_en;
+	if (device_create_file(flash_dev, &dev_attr_rear_flash) < 0) {
+		pr_err("failed to create device file, %s\n",
+				dev_attr_rear_flash.attr.name);
+	}
 
-	max77693_led_create_node(pdata);
+#ifdef CONFIG_LEDS_SWITCH
+	if (system_rev < FLASH_SWITCH_REMOVED_REVISION) {
+		if (gpio_request(GPIO_CAM_SW_EN, "CAM_SW_EN"))
+			pr_err("failed to request CAM_SW_EN\n");
+		else
+			gpio_direction_output(GPIO_CAM_SW_EN, 1);
+	}
+#endif
 
 	return ret;
 }
 
 static int __devexit max77693_led_remove(struct platform_device *pdev)
 {
-	struct max77693_dev *max77693 = dev_get_drvdata(pdev->dev.parent);
-	struct max77693_platform_data *max77693_pdata
-		= dev_get_platdata(max77693->dev);
-	struct max77693_led_platform_data *pdata = max77693_pdata->led_data;
 	struct max77693_led_data **led_datas = platform_get_drvdata(pdev);
 	int i;
 
@@ -444,17 +381,33 @@ static int __devexit max77693_led_remove(struct platform_device *pdev)
 	}
 	kfree(led_datas);
 
-	max77693_led_remove_node(pdata);
+	device_remove_file(flash_dev, &dev_attr_rear_flash);
+	device_destroy(camera_class, 0);
+	class_destroy(camera_class);
 
 	return 0;
 }
 
-static struct platform_driver max77693_led_driver = {
+void max77693_led_shutdown(struct device *dev)
+{
+	struct max77693_led_data **led_datas = dev_get_drvdata(dev);
+
+	/* Turn off LED */
+	max77693_set_bits(led_datas[2]->i2c,
+		MAX77693_LED_REG_FLASH_EN,
+		led_en_mask[2],
+		0x02 << led_en_shift[2]);
+}
+
+static struct platform_driver max77693_led_driver =
+{
 	.probe		= max77693_led_probe,
 	.remove		= __devexit_p(max77693_led_remove),
-	.driver		=	{
+	.driver		=
+	{
 		.name	= "max77693-led",
 		.owner	= THIS_MODULE,
+		.shutdown = max77693_led_shutdown,
 	},
 };
 

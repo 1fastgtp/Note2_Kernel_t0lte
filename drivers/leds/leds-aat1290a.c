@@ -12,7 +12,7 @@
 int *aat1290a_ctrl;
 struct aat1290a_led_platform_data *led_pdata;
 
-struct class *flash_class;
+extern struct class *camera_class; /*sys/class/camera*/
 struct device *aat1290a_dev;
 
 static int aat1290a_setPower(int onoff, int level)
@@ -21,6 +21,8 @@ static int aat1290a_setPower(int onoff, int level)
 	if (led_pdata->status == STATUS_AVAILABLE) {
 		led_pdata->torch_en(0);
 		led_pdata->torch_set(0);
+		led_pdata->switch_sel(!onoff);
+		/* onoff = 0 - select aat1290a, onoff = 1 - select ISP*/
 		udelay(10);
 		if (onoff) {
 			led_pdata->torch_set(1);
@@ -49,7 +51,6 @@ static int aat1290a_freeGpio(void)
 		led_pdata->status = STATUS_UNAVAILABLE;
 	} else {
 		LED_ERROR("GPIO already free!");
-		return -1;
 	}
 
 	return 0;
@@ -65,7 +66,6 @@ static int aat1290a_setGpio(void)
 		led_pdata->status = STATUS_AVAILABLE;
 	} else {
 		LED_ERROR("GPIO already set!");
-		return -1;
 	}
 
 	return 0;
@@ -125,22 +125,20 @@ static long aat1290a_ioctl(struct file *file,
 	return 0;
 }
 
-static ssize_t aat1290a_power(struct device *dev,
+ssize_t aat1290a_power(struct device *dev,
 			struct device_attribute *attr, const char *buf,
 			size_t count)
 {
 	int brightness = 0;
 
-	LED_ERROR("[%s] buf[0] %d, count %d", __func__, buf[0], count);
-
-	if (count == 1)
+	if (buf[0] < 0x30 || buf[0] > 0x39) {
+		LED_ERROR("data is wrong!");
+		return count;
+	} else if (buf[1] < 0x30 || buf[1] > 0x39)
 		brightness = (int) (buf[0] - 0x30);
-	else if (count == 2) {
+	else {
 		brightness = brightness + (int) (buf[0] - 0x30) * 10;
 		brightness = brightness + (int) (buf[1] - 0x30);
-	} else {
-		LED_ERROR("data is too long!");
-		return count;
 	}
 
 	if (brightness < 0 || brightness >= TORCH_BRIGHTNESS_INVALID) {
@@ -150,10 +148,12 @@ static ssize_t aat1290a_power(struct device *dev,
 
 	if (brightness == 0) {
 		aat1290a_setPower(0, 0);
+		/*
 		if (aat1290a_freeGpio()) {
 			LED_ERROR("aat1290a_freeGpio failed!\n");
 			return count;
 		}
+		*/
 	} else {
 		if (aat1290a_setGpio()) {
 			LED_ERROR("aat1290a_setGpio failed!\n");
@@ -165,26 +165,15 @@ static ssize_t aat1290a_power(struct device *dev,
 	return count;
 }
 
-int aat1290a_flash_power(int onoff)
+ssize_t aat1290a_get_max_brightness(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	if (onoff == 0) {
-		aat1290a_setPower(0, 0);
-		if (aat1290a_freeGpio()) {
-			LED_ERROR("aat1290a_freeGpio failed!\n");
-			return -EIO;
-		}
-	} else {
-		if (aat1290a_setGpio()) {
-			LED_ERROR("aat1290a_setGpio failed!\n");
-			return -EIO;
-		}
-		aat1290a_setPower(1, TORCH_BRIGHTNESS_100);
-	}
-
-	return 0;
+	return snprintf(buf,
+		sizeof(led_pdata->brightness), "%d", TORCH_BRIGHTNESS_100);
 }
 
-static DEVICE_ATTR(flash_power, S_IWUSR, NULL, aat1290a_power);
+static DEVICE_ATTR(rear_flash, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH,
+	aat1290a_get_max_brightness, aat1290a_power);
 
 static const struct file_operations aat1290a_fops = {
 	.owner = THIS_MODULE,
@@ -210,17 +199,18 @@ static int aat1290a_led_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	flash_class = class_create(THIS_MODULE, "flash");
-	if (IS_ERR(flash_class))
-		LED_ERROR("Failed to create class(flash)!\n");
-	aat1290a_dev = device_create(flash_class, NULL, 0, NULL, "flash");
+	aat1290a_dev = device_create(camera_class, NULL, 0, NULL, "flash");
 	if (IS_ERR(aat1290a_dev))
 		LED_ERROR("Failed to create device(flash)!\n");
 
-	if (device_create_file(aat1290a_dev, &dev_attr_flash_power) < 0) {
+	if (device_create_file(aat1290a_dev, &dev_attr_rear_flash) < 0) {
 		LED_ERROR("failed to create device file, %s\n",
-				dev_attr_flash_power.attr.name);
+				dev_attr_rear_flash.attr.name);
 	}
+
+	if (led_pdata)
+		led_pdata->initGpio();
+	aat1290a_setGpio();
 	return 0;
 }
 
@@ -229,9 +219,9 @@ static int __devexit aat1290a_led_remove(struct platform_device *pdev)
 	led_pdata->freeGpio();
 	misc_deregister(&aat1290a_miscdev);
 
-	device_remove_file(aat1290a_dev, &dev_attr_flash_power);
-	device_destroy(flash_class, 0);
-	class_destroy(flash_class);
+	device_remove_file(aat1290a_dev, &dev_attr_rear_flash);
+	device_destroy(camera_class, 0);
+	class_destroy(camera_class);
 
 	return 0;
 }

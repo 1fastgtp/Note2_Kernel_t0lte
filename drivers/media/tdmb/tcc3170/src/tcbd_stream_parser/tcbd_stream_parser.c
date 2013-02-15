@@ -210,7 +210,7 @@ static void tcbd_merge_each_stream(struct tcbd_split_stream_data *_parser,
 		}
 		if (_parser->quick_msc_idx[header->subch] == 0xFF)
 			_parser->quick_msc_idx[header->subch] =
-							_parser->num_subch++;
+				_parser->num_subch++;
 
 		quick_msc_idx = _parser->quick_msc_idx[header->subch];
 		if (quick_msc_idx >= TCBD_MAX_NUM_SERVICE)
@@ -243,7 +243,7 @@ static void tcbd_merge_each_stream(struct tcbd_split_stream_data *_parser,
 			"currpos:%d, size:%d\n", header->type, header->subch,
 			merged->buffer, merged->curr_pos, header->data_size);
 	memcpy(merged->buffer + merged->curr_pos, chunk_buff,
-						header->data_size);
+			header->data_size);
 	merged->curr_pos += header->data_size;
 }
 
@@ -288,7 +288,7 @@ static s32 tcbd_push_merged_stream(struct tcbd_split_stream_data *_parser)
 	}
 	return 0;
 }
-#endif /* __MERGE_EACH_TYPEOF_STREAM__ */
+#endif /*__MERGE_EACH_TYPEOF_STREAM__ */
 
 static void tcbd_stack_chunk(struct tcbd_split_stream_data *_parser,
 							u8 *_buffer)

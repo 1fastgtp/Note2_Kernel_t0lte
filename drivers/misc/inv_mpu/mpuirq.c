@@ -36,7 +36,6 @@
 #include <linux/wait.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
-#include <linux/wakelock.h>
 
 #include <linux/mpu_411.h>
 #include "mpuirq.h"
@@ -56,15 +55,11 @@ struct mpuirq_dev_data {
 	int accel_divider;
 	int data_ready;
 	int timeout;
-	struct delayed_work reactive_work;
-	struct mldl_cfg *mldl_dev_cfg;
-	struct wake_lock reactive_wake_lock;
 };
 
 static struct mpuirq_dev_data mpuirq_dev_data;
 static struct mpuirq_data mpuirq_data;
 static char *interface = MPUIRQ_NAME;
-static int mpuirq_logcount = 51;
 
 static int mpuirq_open(struct inode *inode, struct file *file)
 {
@@ -161,15 +156,10 @@ static irqreturn_t mpuirq_handler(int irq, void *dev_id)
 {
 	static int mycount;
 	struct timeval irqtime;
-	struct mldl_cfg *mldl_cfg = dev_id;
 	mycount++;
 
 	mpuirq_data.interruptcount++;
 
-	if (mpuirq_logcount++ > 51) {
-		pr_info("mpuirq_handler: every 50'th\n");
-		mpuirq_logcount = 0;
-	}
 	/* wake up (unblock) for reading data from userspace */
 	/* and ignore first interrupt generated in module init */
 	mpuirq_dev_data.data_ready = 1;
@@ -180,55 +170,10 @@ static irqreturn_t mpuirq_handler(int irq, void *dev_id)
 	mpuirq_data.data_type = MPUIRQ_DATA_TYPE_MPU_IRQ;
 	mpuirq_data.data = 0;
 
-	if (!mldl_cfg->inv_mpu_state->use_accel_reactive)
-		wake_up_interruptible(&mpuirq_wait);
-	if (mldl_cfg->inv_mpu_state->accel_reactive)
-		schedule_delayed_work(&mpuirq_dev_data.reactive_work,
-		msecs_to_jiffies(20));
+	wake_up_interruptible(&mpuirq_wait);
 
 	return IRQ_HANDLED;
 
-}
-
-static void reactive_work_func(struct work_struct *work)
-{
-	struct mldl_cfg *mldl_cfg = mpuirq_dev_data.mldl_dev_cfg;
-
-	int err = 0;
-	unsigned char reg_data = 0;
-
-	char dummy_data = 1;
-	struct i2c_adapter *slave_adapter;
-	struct ext_slave_platform_data **pdata_slave = mldl_cfg->pdata_slave;
-	slave_adapter =
-		i2c_get_adapter(pdata_slave[EXT_SLAVE_TYPE_ACCEL]->adapt_num);
-
-	err = inv_serial_read(slave_adapter, 0x68,
-		 MPUREG_INT_STATUS, 1, &reg_data);
-	if (err)
-		pr_err("%s i2c err\n", __func__);
-	if ((reg_data & BIT_MOT_EN) ||
-		((reg_data & BIT_RAW_RDY_EN) &&
-		mldl_cfg->inv_mpu_state->reactive_factory)) {
-		if (mldl_cfg->inv_mpu_state->accel_reactive)
-			disable_irq_wake(mpuirq_dev_data.irq);
-
-		pr_info("Reactive Alert\n");
-		mldl_cfg->inv_mpu_state->accel_reactive = false;
-		mldl_cfg->inv_mpu_state->reactive_factory = false;
-		wake_lock_timeout(&mpuirq_dev_data.reactive_wake_lock,
-			msecs_to_jiffies(2000));
-		err = inv_serial_read(slave_adapter, 0x68,
-				MPUREG_INT_ENABLE, sizeof(reg_data), &reg_data);
-		if (err)
-			pr_err("%s: read INT reg failed\n", __func__);
-		reg_data &= ~BIT_MOT_EN;
-		err = inv_serial_single_write(slave_adapter, 0x68,
-				 MPUREG_INT_ENABLE,
-				 reg_data);
-		if (err)
-			pr_err("%s: write INT reg failed\n", __func__);
-	}
 }
 
 /* define which file operations are supported */
@@ -254,7 +199,6 @@ int mpuirq_init(struct i2c_client *mpu_client, struct mldl_cfg *mldl_cfg)
 	int res;
 
 	mpuirq_dev_data.mpu_client = mpu_client;
-	mpuirq_dev_data.mldl_dev_cfg = mldl_cfg;
 
 	dev_info(&mpu_client->adapter->dev,
 		 "Module Param interface = %s\n", interface);
@@ -266,22 +210,21 @@ int mpuirq_init(struct i2c_client *mpu_client, struct mldl_cfg *mldl_cfg)
 	mpuirq_dev_data.timeout = 0;
 	mpuirq_dev_data.dev = &mpuirq_device;
 
-	wake_lock_init(&mpuirq_dev_data.reactive_wake_lock, WAKE_LOCK_SUSPEND,
-		       "reactive_wake_lock");
-
 	if (mpuirq_dev_data.irq) {
 		unsigned long flags;
-
-		INIT_DELAYED_WORK(&mpuirq_dev_data.reactive_work,
-			reactive_work_func);
 		if (BIT_ACTL_LOW == ((mldl_cfg->pdata->int_config) & BIT_ACTL))
 			flags = IRQF_TRIGGER_FALLING;
 		else
 			flags = IRQF_TRIGGER_RISING;
 
 		flags |= IRQF_SHARED;
-		res = request_threaded_irq(mpuirq_dev_data.irq, NULL,
-			mpuirq_handler,	flags, interface, mldl_cfg);
+		res =
+		    request_irq(mpuirq_dev_data.irq, mpuirq_handler, flags,
+				interface, &mpuirq_dev_data.irq);
+
+		/* mpu_irq Interrupt isr enable */
+		if (mldl_cfg->pdata && mldl_cfg->pdata->enable_irq_handler)
+			mldl_cfg->pdata->enable_irq_handler();
 		if (res) {
 			dev_err(&mpu_client->adapter->dev,
 				"myirqtest: cannot register IRQ %d\n",
@@ -295,6 +238,7 @@ int mpuirq_init(struct i2c_client *mpu_client, struct mldl_cfg *mldl_cfg)
 					 &mpuirq_dev_data.irq);
 			}
 		}
+
 	} else {
 		res = 0;
 	}
@@ -306,7 +250,6 @@ void mpuirq_exit(void)
 {
 	if (mpuirq_dev_data.irq > 0)
 		free_irq(mpuirq_dev_data.irq, &mpuirq_dev_data.irq);
-	wake_lock_destroy(&mpuirq_dev_data.reactive_wake_lock);
 
 	dev_info(mpuirq_device.this_device, "Unregistering %s\n", MPUIRQ_NAME);
 	misc_deregister(&mpuirq_device);

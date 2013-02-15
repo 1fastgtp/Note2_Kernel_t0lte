@@ -175,7 +175,7 @@ struct spi_device *tdmb_get_spi_handle(void);
 #endif
 
 #ifdef CONFIG_BATTERY_SEC
-extern int poweroff_charging;
+extern unsigned int is_lpcharging_state(void);
 #endif
 
 #endif
