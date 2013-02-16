@@ -20,14 +20,13 @@
 #include <linux/usb/composite.h>
 #include <linux/if_ether.h>
 
-struct android_usb_function {
-	struct list_head	list;
-	char			*name;
-	int 			(*bind_config)(struct usb_configuration *c);
-};
-
 struct android_usb_product {
-	/* Default product ID. */
+	/* Vendor ID for this set of functions.
+	 * Default vendor_id in platform data will be used if this is zero.
+	 */
+	__u16 vendor_id;
+
+	/* Product ID for this set of functions. */
 	__u16 product_id;
 
 	/* List of function names associated with this product.
@@ -68,6 +67,13 @@ struct android_usb_platform_data {
 	 */
 	int num_functions;
 	char **functions;
+
+	/* Number of LUNs function have  [For USB Mass storage]
+	 * (anywhere from 1 to FSG_MAX_LUNS which is 8).
+	 */
+	unsigned int            nluns;
+	/* cdfs supprot : verizon require */
+	unsigned int		cdfs_support;
 };
 
 /* Platform data for "usb_mass_storage" driver. */
@@ -77,7 +83,6 @@ struct usb_mass_storage_platform_data {
 	char *product;
 	int release;
 
-	char can_stall;
 	/* number of LUNS */
 	int nluns;
 };
@@ -89,9 +94,17 @@ struct usb_ether_platform_data {
 	const char *vendorDescr;
 };
 
-extern void android_register_function(struct android_usb_function *f);
+/* Platform data for ACM driver. */
+struct acm_platform_data {
+	u8	num_inst;
+};
 
-extern int android_enable_function(struct usb_function *f, int enable);
-
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+int register_usb_composite_notifier(struct notifier_block *notifier);
+int unregister_usb_composite_notifier(struct notifier_block *notifier);
+#else
+#define register_usb_composite_notifier		NULL
+#define unregister_usb_composite_notifier	NULL
+#endif
 
 #endif	/* __LINUX_USB_ANDROID_H */

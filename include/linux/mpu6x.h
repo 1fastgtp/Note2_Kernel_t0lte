@@ -1,19 +1,20 @@
 /*
-  * Copyright (C) 2011 InvenSense Corporation, All Rights Reserved.
-  *
-  * This program is free software; you can redistribute it and/or modify
-  * it under the terms of the GNU General Public License as published by
-  * the Free Software Foundation; either version 2 of the License, or
-  * (at your option) any later version.
-  *
-  * This program is distributed in the hope that it will be useful,
-  * but WITHOUT ANY WARRANTY; without even the implied warranty of
-  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  * GNU General Public License for more details.
-  *
-  * You should have received a copy of the GNU General Public License
-  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
-  *
+ $License:
+    Copyright (C) 2011 InvenSense Corporation, All Rights Reserved.
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  $
  */
 
 #ifndef __MPU_H_
@@ -25,6 +26,8 @@
 #elif defined LINUX
 #include <sys/ioctl.h>
 #endif
+
+#define CONFIG_MPU_SENSORS_MPU6050B1
 
 #if defined CONFIG_MPU_SENSORS_MPU6050A2
 #include "mpu6050a2.h"
@@ -93,10 +96,10 @@ struct mpu_read_write {
 };
 
 enum mpuirq_data_type {
-	MPUIRQ_DATA_TYPE_MPU_IRQ,
-	MPUIRQ_DATA_TYPE_SLAVE_IRQ,
-	MPUIRQ_DATA_TYPE_PM_EVENT,
-	MPUIRQ_DATA_TYPE_NUM_TYPES,
+    MPUIRQ_DATA_TYPE_MPU_IRQ,
+    MPUIRQ_DATA_TYPE_SLAVE_IRQ,
+    MPUIRQ_DATA_TYPE_PM_EVENT,
+    MPUIRQ_DATA_TYPE_NUM_TYPES,
 };
 
 /* User space PM event notification */
@@ -344,9 +347,6 @@ struct mpu_platform_data {
 	struct ext_slave_platform_data accel;
 	struct ext_slave_platform_data compass;
 	struct ext_slave_platform_data pressure;
-	void (*poweron) (int);
-	int reset;
-
 };
 
 
@@ -413,7 +413,7 @@ struct ext_slave_descr *lsm303dlha_get_slave_descr(void);
 /* MPU6050 Accel */
 #if defined CONFIG_MPU_SENSORS_MPU6050A2 || \
 	defined CONFIG_MPU_SENSORS_MPU6050B1
-struct ext_slave_descr *mantis_get_slave_descr(void);
+struct ext_slave_descr *mpu6050_get_slave_descr(void);
 #undef get_accel_slave_descr
 #define get_accel_slave_descr mantis_get_slave_descr
 #endif
@@ -478,7 +478,7 @@ struct ext_slave_descr *yas529_get_slave_descr(void);
 #define get_compass_slave_descr yas529_get_slave_descr
 #endif
 
-#ifdef CONFIG_MPU_SENSORS_YAS530	/* Yamaha compass */
+#ifdef CONFIG_MPU_SENSORS_YAS530_NEW	/* Yamaha compass */
 struct ext_slave_descr *yas530_get_slave_descr(void);
 #undef get_compass_slave_descr
 #define get_compass_slave_descr yas530_get_slave_descr
@@ -507,4 +507,3 @@ struct ext_slave_descr *bma085_get_slave_descr(void);
 #endif
 
 #endif				/* __MPU_H_ */
-

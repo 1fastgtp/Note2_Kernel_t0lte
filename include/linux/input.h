@@ -440,8 +440,14 @@ struct input_keymap_entry {
 
 #define KEY_WIMAX		246
 #define KEY_RFKILL		247	/* Key that controls all radios */
-#define KEY_FOLDER_OPEN	248
-#define KEY_FOLDER_CLOSE	249
+
+#define KEY_POUND		248
+#define KEY_STAR		249
+#define KEY_NETWORK		250
+
+#define KEY_FOLDER_OPEN		251  /*only use Grande CHN CTC */
+#define KEY_FOLDER_CLOSE	252  /*only use Grande CHN CTC */
+#define KEY_3G	253  /*only use Grande CHN CTC */
 
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
@@ -663,7 +669,7 @@ struct input_keymap_entry {
 #define KEY_NUMERIC_9		0x209
 #define KEY_NUMERIC_STAR	0x20a
 #define KEY_NUMERIC_POUND	0x20b
-#define KEY_CAMERA_SNAPSHOT	0x2fe
+
 #define KEY_CAMERA_FOCUS	0x210
 #define KEY_WPS_BUTTON		0x211	/* WiFi Protected Setup key */
 
@@ -677,6 +683,14 @@ struct input_keymap_entry {
 #define KEY_CAMERA_DOWN		0x218
 #define KEY_CAMERA_LEFT		0x219
 #define KEY_CAMERA_RIGHT	0x21a
+
+#define KEY_DMB_ANT_DET_UP		0x21b
+#define KEY_DMB_ANT_DET_DOWN	0x21c
+
+#define KEY_PEN_PDCT		0x230 /* E-PEN PDCT flag*/
+
+#define KEY_FAKE_PWR		0x240 /* Fake Power off flag*/
+
 
 #define BTN_TRIGGER_HAPPY		0x2c0
 #define BTN_TRIGGER_HAPPY1		0x2c0
@@ -789,7 +803,9 @@ struct input_keymap_entry {
 #define ABS_MT_PRESSURE		0x3a	/* Pressure on contact area */
 #define ABS_MT_DISTANCE		0x3b	/* Contact hover distance */
 #define ABS_MT_ANGLE		0x3c	/* touch angle */
-#define ABS_MT_PALM			0x3d	/* palm touch */
+#define ABS_MT_COMPONENT	0x3c	/* touch component */
+#define ABS_MT_PALM		0x3d	/* palm touch */
+#define ABS_MT_SUMSIZE		0x3d	/* touch sumsize */
 
 #ifdef __KERNEL__
 /* Implementation details, userspace should not care about these */
@@ -819,8 +835,7 @@ struct input_keymap_entry {
 #define SW_KEYPAD_SLIDE		0x0a  /* set = keypad slide out */
 #define SW_FRONT_PROXIMITY	0x0b  /* set = front proximity sensor active */
 #define SW_ROTATE_LOCK		0x0c  /* set = rotate locked/disabled */
-#define SW_HPHL_OVERCURRENT	0x0d  /* set = over current on left hph */
-#define SW_HPHR_OVERCURRENT	0x0e  /* set = over current on right hph */
+#define SW_PEN_INSERT			0x0e	/* set = pen out */
 #define SW_MAX			0x0f
 #define SW_CNT			(SW_MAX+1)
 

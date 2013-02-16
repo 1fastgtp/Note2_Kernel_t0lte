@@ -7,7 +7,6 @@
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License version 2 as
    published by the Free Software Foundation;
-
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
    OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS.
@@ -23,6 +22,8 @@
 */
 #ifdef CONFIG_BT_MGMT
 #include "hci_mgmt.h"
+#elif defined(CONFIG_BT_TIZEN)
+#include "tizen/hci.h"
 #else
 #ifndef __HCI_H
 #define __HCI_H
@@ -169,8 +170,8 @@ enum {
 #define ALL_ESCO_MASK (SCO_ESCO_MASK | ESCO_EV3 | ESCO_EV4 | ESCO_EV5 | \
    ESCO_2EV3 /*EDR_ESCO_MASK*/)
 #else
-#define ALL_ESCO_MASK	(SCO_ESCO_MASK | ESCO_EV3 | ESCO_EV4 | ESCO_EV5 | \
-			EDR_ESCO_MASK)
+#define ALL_ESCO_MASK (SCO_ESCO_MASK | ESCO_EV3 | ESCO_EV4 | ESCO_EV5 | \
+   EDR_ESCO_MASK)
 #endif
 /* SS_BLUEZ_BT(is80.hwang) End */
 

@@ -76,7 +76,8 @@
 #define MAX_FLASH_DRV_LEVEL	63	/* 15.625 + 15.625*63 mA */
 #define MAX_TORCH_DRV_LEVEL	15	/* 15.625 + 15.625*15 mA */
 
-enum max77693_led_id {
+enum max77693_led_id
+{
 	MAX77693_FLASH_LED_1,
 	MAX77693_FLASH_LED_2,
 	MAX77693_TORCH_LED_1,
@@ -84,7 +85,8 @@ enum max77693_led_id {
 	MAX77693_LED_MAX,
 };
 
-enum max77693_led_time {
+enum max77693_led_time
+{
 	MAX77693_FLASH_TIME_62P5MS,
 	MAX77693_FLASH_TIME_125MS,
 	MAX77693_FLASH_TIME_187P5MS,
@@ -104,7 +106,8 @@ enum max77693_led_time {
 	MAX77693_FLASH_TIME_MAX,
 };
 
-enum max77693_torch_time {
+enum max77693_torch_time
+{
 	MAX77693_TORCH_TIME_262MS,
 	MAX77693_TORCH_TIME_524MS,
 	MAX77693_TORCH_TIME_786MS,
@@ -124,17 +127,20 @@ enum max77693_torch_time {
 	MAX77693_TORCH_TIME_MAX,
 };
 
-enum max77693_timer_mode {
+enum max77693_timer_mode
+{
 	MAX77693_TIMER_MODE_ONE_SHOT,
 	MAX77693_TIMER_MODE_MAX_TIMER,
 };
 
-enum max77693_led_cntrl_mode {
+enum max77693_led_cntrl_mode
+{
 	MAX77693_LED_CTRL_BY_FLASHSTB,
 	MAX77693_LED_CTRL_BY_I2C,
 };
 
-struct max77693_led {
+struct max77693_led
+{
 	const char			*name;
 	const char			*default_trigger;
 	int				id;
@@ -144,15 +150,10 @@ struct max77693_led {
 	enum max77693_led_cntrl_mode	cntrl_mode;
 };
 
-struct max77693_led_platform_data {
-	void (*hw_init) (void);
-	int torch_en;
-	int flash_en;
+struct max77693_led_platform_data
+{
 	int num_leds;
 	struct max77693_led leds[MAX77693_LED_MAX];
-
-	struct device *led_dev;
-	struct class *led_class;
 };
 
 #endif

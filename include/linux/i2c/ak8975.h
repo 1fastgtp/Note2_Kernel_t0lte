@@ -66,9 +66,7 @@
 #ifdef __KERNEL__
 struct akm8975_platform_data {
 	int gpio_data_ready_int;
-	void	(*power_on) (int);
 };
 #endif
 
 #endif
-

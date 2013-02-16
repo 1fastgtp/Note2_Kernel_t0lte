@@ -163,6 +163,9 @@ struct sec_fg_info {
 #define atl_vfcapacity		0x4024
 #define atl_low_bat_comp_start_vol	3450
 
+/* Current range for P2(not dependent on battery type */
+#if defined(CONFIG_MACH_P2_REV00) || defined(CONFIG_MACH_P2_REV01) || \
+	defined(CONFIG_MACH_P2_REV02)
 #define CURRENT_RANGE1	0
 #define CURRENT_RANGE2	-100
 #define CURRENT_RANGE3	-750
@@ -207,6 +210,154 @@ struct sec_fg_info {
 #define ATL_Range2_3_Slope		76
 #define ATL_Range1_1_Slope		0
 #define ATL_Range1_3_Slope		0
+#elif defined(CONFIG_MACH_P4W_REV00) || defined(CONFIG_MACH_P4W_REV01) || \
+	defined(CONFIG_MACH_P11)	/* P4W battery parameter */
+/* Current range for P4W(not dependent on battery type */
+#define CURRENT_RANGE1	0
+#define CURRENT_RANGE2	-200
+#define CURRENT_RANGE3	-600
+#define CURRENT_RANGE4	-1500
+#define CURRENT_RANGE5	-2500
+#define CURRENT_RANGE_MAX	CURRENT_RANGE5
+#define CURRENT_RANGE_MAX_NUM	5
+/* SDI type low battery compensation offset */
+#define SDI_Range5_1_Offset		3318
+#define SDI_Range5_3_Offset		3383
+#define SDI_Range4_1_Offset		3451
+#define SDI_Range4_3_Offset		3618
+#define SDI_Range3_1_Offset		3453
+#define SDI_Range3_3_Offset		3615
+#define SDI_Range2_1_Offset		3447
+#define SDI_Range2_3_Offset		3606
+#define SDI_Range1_1_Offset		3438
+#define SDI_Range1_3_Offset		3591
+#define SDI_Range5_1_Slope		0
+#define SDI_Range5_3_Slope		0
+#define SDI_Range4_1_Slope		53
+#define SDI_Range4_3_Slope		94
+#define SDI_Range3_1_Slope		54
+#define SDI_Range3_3_Slope		92
+#define SDI_Range2_1_Slope		45
+#define SDI_Range2_3_Slope		78
+#define SDI_Range1_1_Slope		0
+#define SDI_Range1_3_Slope		0
+/* Default value for build */
+/* ATL type low battery compensation offset */
+#define ATL_Range4_1_Offset		3298
+#define ATL_Range4_3_Offset		3330
+#define ATL_Range3_1_Offset		3375
+#define ATL_Range3_3_Offset		3445
+#define ATL_Range2_1_Offset		3371
+#define ATL_Range2_3_Offset		3466
+#define ATL_Range1_1_Offset		3362
+#define ATL_Range1_3_Offset		3443
+#define ATL_Range4_1_Slope		0
+#define ATL_Range4_3_Slope		0
+#define ATL_Range3_1_Slope		50
+#define ATL_Range3_3_Slope		77
+#define ATL_Range2_1_Slope		40
+#define ATL_Range2_3_Slope		111
+#define ATL_Range1_1_Slope		0
+#define ATL_Range1_3_Slope		0
+#elif defined(CONFIG_MACH_P8_REV00) || defined(CONFIG_MACH_P8_REV01) \
+	|| defined(CONFIG_MACH_P8LTE_REV00) /* P8 battery parameter */
+/* Current range for P8(not dependent on battery type */
+#define CURRENT_RANGE1	0
+#define CURRENT_RANGE2	-200
+#define CURRENT_RANGE3	-600
+#define CURRENT_RANGE4	-1500
+#define CURRENT_RANGE5	-2500
+#define CURRENT_RANGE_MAX	CURRENT_RANGE5
+#define CURRENT_RANGE_MAX_NUM	5
+/* SDI type low battery compensation Slope & Offset for 1% SOC range*/
+#define SDI_Range1_1_Slope		0
+#define SDI_Range2_1_Slope		54
+#define SDI_Range3_1_Slope		66
+#define SDI_Range4_1_Slope		69
+#define SDI_Range5_1_Slope		0
+
+#define SDI_Range1_1_Offset		3391
+#define SDI_Range2_1_Offset		3402
+#define SDI_Range3_1_Offset		3409
+#define SDI_Range4_1_Offset		3414
+#define SDI_Range5_1_Offset		3240
+
+/* SDI type low battery compensation Slope & Offset for 3% SOC range*/
+#define SDI_Range1_3_Slope		0
+#define SDI_Range2_3_Slope		92
+#define SDI_Range3_3_Slope		125
+#define SDI_Range4_3_Slope		110
+#define SDI_Range5_3_Slope		0
+
+#define SDI_Range1_3_Offset		3524
+#define SDI_Range2_3_Offset		3542
+#define SDI_Range3_3_Offset		3562
+#define SDI_Range4_3_Offset		3539
+#define SDI_Range5_3_Offset		3265
+
+/* ATL type low battery compensation offset */
+#define ATL_Range4_1_Offset		3298
+#define ATL_Range4_3_Offset		3330
+#define ATL_Range3_1_Offset		3375
+#define ATL_Range3_3_Offset		3445
+#define ATL_Range2_1_Offset		3371
+#define ATL_Range2_3_Offset		3466
+#define ATL_Range1_1_Offset		3362
+#define ATL_Range1_3_Offset		3443
+
+#define ATL_Range4_1_Slope		0
+#define ATL_Range4_3_Slope		0
+#define ATL_Range3_1_Slope		50
+#define ATL_Range3_3_Slope		77
+#define ATL_Range2_1_Slope		40
+#define ATL_Range2_3_Slope		111
+#define ATL_Range1_1_Slope		0
+#define ATL_Range1_3_Slope		0
+#else	/* default value */
+/* Current range for default(not dependent on battery type */
+#define CURRENT_RANGE1	0
+#define CURRENT_RANGE2	-100
+#define CURRENT_RANGE3	-750
+#define CURRENT_RANGE4	-1250
+#define CURRENT_RANGE_MIN	CURRENT_RANGE1
+#define CURRENT_RANGE_MAX	CURRENT_RANGE4
+/* added as dummy value to fix build error */
+#define CURRENT_RANGE_MAX_NUM	4
+/* SDI type low battery compensation offset */
+#define SDI_Range4_1_Offset		3371
+#define SDI_Range4_3_Offset		3478
+#define SDI_Range3_1_Offset		3453
+#define SDI_Range3_3_Offset		3614
+#define SDI_Range2_1_Offset		3447
+#define SDI_Range2_3_Offset		3606
+#define SDI_Range1_1_Offset		3438
+#define SDI_Range1_3_Offset		3591
+#define SDI_Range4_1_Slope		0
+#define SDI_Range4_3_Slope		0
+#define SDI_Range3_1_Slope		50
+#define SDI_Range3_3_Slope		90
+#define SDI_Range2_1_Slope		50
+#define SDI_Range2_3_Slope		78
+#define SDI_Range1_1_Slope		0
+#define SDI_Range1_3_Slope		0
+/* ATL type low battery compensation offset */
+#define ATL_Range4_1_Offset		3298
+#define ATL_Range4_3_Offset		3330
+#define ATL_Range3_1_Offset		3375
+#define ATL_Range3_3_Offset		3445
+#define ATL_Range2_1_Offset		3371
+#define ATL_Range2_3_Offset		3466
+#define ATL_Range1_1_Offset		3362
+#define ATL_Range1_3_Offset		3443
+#define ATL_Range4_1_Slope		0
+#define ATL_Range4_3_Slope		0
+#define ATL_Range3_1_Slope		50
+#define ATL_Range3_3_Slope		77
+#define ATL_Range2_1_Slope		40
+#define ATL_Range2_3_Slope		111
+#define ATL_Range1_1_Slope		0
+#define ATL_Range1_3_Slope		0
+#endif
 
 /* Temperature adjust value */
 #define SDI_TRIM1_1	122

@@ -321,8 +321,6 @@ struct usb_bus {
 	u8 otg_port;			/* 0, or number of OTG/HNP port */
 	unsigned is_b_host:1;		/* true during some HNP roleswitches */
 	unsigned b_hnp_enable:1;	/* OTG: did A-Host enable HNP? */
-	unsigned hnp_support:1;		/* OTG: HNP is supported on OTG port */
-	struct delayed_work hnp_polling;/* OTG: HNP polling work */
 	unsigned sg_tablesize;		/* 0 or largest number of sg list entries */
 
 	int devnum_next;		/* Next open device number in
@@ -364,16 +362,6 @@ struct usb_bus {
  * limit. Because the arrays need to add a bit for hub status data, we
  * do 31, so plus one evens out to four bytes.
  */
-
-#if defined(CONFIG_USB_PEHCI_HCD) || defined(CONFIG_USB_PEHCI_HCD_MODULE)
-#define USB_OTG_SUSPEND		0x1
-#define USB_OTG_ENUMERATE	0x2
-#define USB_OTG_DISCONNECT	0x4
-#define USB_OTG_RESUME		0x8
-#define USB_OTG_REMOTEWAKEUP	0x10
-#define USB_OTG_WAKEUP_ALL	0x20
-#endif
-
 #define USB_MAXCHILDREN		(31)
 
 struct usb_tt;
@@ -487,18 +475,6 @@ struct usb_device {
 	struct dentry *usbfs_dentry;
 #endif
 
-#if defined(CONFIG_USB_PEHCI_HCD) || defined(CONFIG_USB_PEHCI_HCD_MODULE)
-	/*otg add ons */
-	u8 otgdevice;				/*device is otg type */
-
-	/*otg states from otg driver, suspend, enumerate, disconnect */
-	u8 otgstate;
-	void *otgpriv;
-	void (*otg_notif) (void *otg_priv,
-				unsigned long notif, unsigned long data);
-	void *hcd_priv;
-	void (*hcd_suspend) (void *hcd_priv);
-#endif
 	int maxchild;
 	struct usb_device *children[USB_MAXCHILDREN];
 
@@ -1013,6 +989,9 @@ extern int usb_disabled(void);
 
 /* The following flags are used internally by usbcore and HCDs */
 #define URB_DIR_IN		0x0200	/* Transfer from device to host */
+#ifdef CONFIG_HOST_COMPLIANT_TEST
+#define URB_HCD_DRIVER_TEST	0x0400  /* Do NOT hand back or free this URB. */
+#endif
 #define URB_DIR_OUT		0
 #define URB_DIR_MASK		URB_DIR_IN
 
@@ -1465,6 +1444,7 @@ extern int usb_string(struct usb_device *dev, int index,
 /* wrappers that also update important state inside usbcore */
 extern int usb_clear_halt(struct usb_device *dev, int pipe);
 extern int usb_reset_configuration(struct usb_device *dev);
+extern void usb_force_disconnect(struct usb_device *udev);
 extern int usb_set_interface(struct usb_device *dev, int ifnum, int alternate);
 extern void usb_reset_endpoint(struct usb_device *dev, unsigned int epaddr);
 
@@ -1630,15 +1610,8 @@ usb_maxpacket(struct usb_device *udev, int pipe, int is_out)
 #define USB_DEVICE_REMOVE	0x0002
 #define USB_BUS_ADD		0x0003
 #define USB_BUS_REMOVE		0x0004
-#define USB_DEVICE_CONFIG	0x0005
-
-#ifdef CONFIG_USB
 extern void usb_register_notify(struct notifier_block *nb);
 extern void usb_unregister_notify(struct notifier_block *nb);
-#else
-static inline void usb_register_notify(struct notifier_block *nb) {}
-static inline void usb_unregister_notify(struct notifier_block *nb) {}
-#endif
 
 #ifdef DEBUG
 #define dbg(format, arg...)						\

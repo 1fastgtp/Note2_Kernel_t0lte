@@ -25,35 +25,28 @@
 #define UART_MODE			4
 
 /* different values that go in for diag_data_type */
-#define DATA_TYPE_EVENT         	0
-#define DATA_TYPE_F3            	1
-#define DATA_TYPE_LOG           	2
-#define DATA_TYPE_RESPONSE      	3
+#define DATA_TYPE_EVENT			0
+#define DATA_TYPE_F3			1
+#define DATA_TYPE_LOG			2
+#define DATA_TYPE_RESPONSE		3
 
 /* Different IOCTL values */
-#define DIAG_IOCTL_COMMAND_REG  	0
+#define DIAG_IOCTL_COMMAND_REG		0
 #define DIAG_IOCTL_SWITCH_LOGGING	7
-#define DIAG_IOCTL_GET_DELAYED_RSP_ID 	8
+#define DIAG_IOCTL_GET_DELAYED_RSP_ID	8
 #define DIAG_IOCTL_LSM_DEINIT		9
 
-/* Machine ID and corresponding PC Tools IDs */
-#define APQ8060_MACHINE_ID	86
-#define AO8960_MACHINE_ID	87
-#define MSM8660_MACHINE_ID	71
-#define MDM9615_MACHINE_ID	104
-#define APQ8064_MACHINE_ID	109
-#define MSM8930_MACHINE_ID	116
-#define MSM8630_MACHINE_ID	117
-#define MSM8230_MACHINE_ID	118
-#define APQ8030_MACHINE_ID	119
-#define MSM8627_MACHINE_ID	120
-#define MSM8227_MACHINE_ID	121
-#define MSM8260A_MACHINE_ID	123
-#define MSM8974_MACHINE_ID	126
+/* PC Tools IDs */
 #define APQ8060_TOOLS_ID	4062
 #define AO8960_TOOLS_ID		4064
 #define APQ8064_TOOLS_ID	4072
-#define MSM8930_TOOLS_ID	4072
+#define MSM8625_TOOLS_ID	4075
+#define MSM8930_TOOLS_ID	4076
+#define MSM8630_TOOLS_ID	4077
+#define MSM8230_TOOLS_ID	4078
+#define APQ8030_TOOLS_ID	4079
+#define MSM8627_TOOLS_ID	4080
+#define MSM8227_TOOLS_ID	4081
 #define MSM8974_TOOLS_ID	4072
 
 #define MSG_MASK_0			(0x00000001)
@@ -109,8 +102,8 @@ the appropriate macros. */
 
 /* This needs to be modified manually now, when we add
  a new RANGE of SSIDs to the msg_mask_tbl */
-#define MSG_MASK_TBL_CNT		24
-#define EVENT_LAST_ID			0x08AD
+#define MSG_MASK_TBL_CNT		23
+#define EVENT_LAST_ID			0x083F
 
 #define MSG_SSID_0			0
 #define MSG_SSID_0_LAST			90
@@ -158,8 +151,6 @@ the appropriate macros. */
 #define MSG_SSID_21_LAST		10300
 #define MSG_SSID_22			10350
 #define MSG_SSID_22_LAST		10361
-#define MSG_SSID_23			0xC000
-#define MSG_SSID_23_LAST		0xC063
 
 struct diagpkt_delay_params {
 	void *rsp_ptr;

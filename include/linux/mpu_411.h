@@ -20,15 +20,8 @@
 #ifndef __MPU_H_
 #define __MPU_H_
 
-#ifdef __KERNEL__
 #include <linux/types.h>
 #include <linux/ioctl.h>
-#elif defined LINUX
-#include <sys/ioctl.h>
-#include <linux/types.h>
-#else
-#include "mltypes.h"
-#endif
 
 /* Number of axes on each sensor */
 #define GYRO_NUM_AXES               (3)
@@ -50,10 +43,8 @@ enum mpuirq_data_type {
 };
 
 /* User space PM event notification */
-#define MPU_PM_EVENT_SUSPEND_PREPARE (0x1)
-#define MPU_PM_EVENT_POST_SUSPEND    (0x2)
-
-#define MPU_KN_EVENT_ENABLE_SENSORS  (0x10)
+#define MPU_PM_EVENT_SUSPEND_PREPARE (3)
+#define MPU_PM_EVENT_POST_SUSPEND    (4)
 
 struct mpuirq_data {
 	__u32 interruptcount;
@@ -178,7 +169,8 @@ enum ext_slave_id {
 	COMPASS_ID_MMC314X,
 	COMPASS_ID_HSCDTD002B,
 	COMPASS_ID_HSCDTD004A,
-	COMPASS_ID_YAS530_EXT,
+  COMPASS_ID_YAS530_EXT,
+
 	PRESSURE_ID_BMA085,
 };
 
@@ -318,11 +310,9 @@ struct mpu_platform_data {
 	__u8 int_config;
 	__u8 level_shifter;
 	__s8 orientation[GYRO_NUM_AXES * GYRO_NUM_AXES];
-	void (*poweron) (int);
-	int reset;
+	void (*enable_irq_handler)(void);
 };
 
-#if defined __KERNEL__ || defined LINUX
 #define MPU_IOCTL (0x81) /* Magic number for MPU Iocts */
 /* IOCTL commands for /dev/mpu */
 
@@ -374,7 +364,5 @@ struct mpu_platform_data {
 #define MPU_GET_MLDL_STATUS		_IOR(MPU_IOCTL, 0x42, __u8)
 #define MPU_GET_I2C_SLAVES_ENABLED	_IOR(MPU_IOCTL, 0x43, __u8)
 #define MPU_READ_ACCEL_OFFSET	_IOR(MPU_IOCTL, 0x44, __u8)
-#define MPU_ACTIVATE_SENSORS	_IOW(MPU_IOCTL, 0x45, __u8)
-#endif
 
 #endif				/* __MPU_H_ */

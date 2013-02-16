@@ -87,6 +87,8 @@
 #define USB_REQ_GET_INTERFACE		0x0A
 #define USB_REQ_SET_INTERFACE		0x0B
 #define USB_REQ_SYNCH_FRAME		0x0C
+#define USB_REQ_SET_SEL			0x30
+#define USB_REQ_SET_ISOCH_DELAY		0x31
 
 #define USB_REQ_SET_ENCRYPTION		0x0D	/* Wireless USB */
 #define USB_REQ_GET_ENCRYPTION		0x0E
@@ -145,10 +147,6 @@
 #define USB_INTR_FUNC_SUSPEND_OPT_MASK	0xFF00
 
 #define USB_ENDPOINT_HALT		0	/* IN/OUT will STALL */
-
-#define OTG_STATUS_SELECTOR	0xF000
-#define THOST_REQ_POLL		2000    /* msec */
-#define HOST_REQUEST_FLAG	0
 
 /* Bit array elements as returned by the USB_REQ_GET_STATUS request. */
 #define USB_DEV_STAT_U1_ENABLED		2	/* transition into U1 state */

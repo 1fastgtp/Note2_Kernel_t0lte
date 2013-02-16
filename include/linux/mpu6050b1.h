@@ -437,4 +437,3 @@ enum mpu_ext_sync {
 	 (full_scale << 3))
 
 #endif				/* __MPU6050_H_ */
-
