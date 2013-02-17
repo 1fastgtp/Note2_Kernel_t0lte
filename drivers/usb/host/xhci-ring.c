@@ -1215,7 +1215,6 @@ static void xhci_cmd_to_noop(struct xhci_hcd *xhci, struct xhci_cd *cur_cd)
 	cur_seg = find_trb_seg(xhci->cmd_ring->first_seg,
 			xhci->cmd_ring->dequeue, &cycle_state);
 
-<<<<<<< HEAD
 	if (!cur_seg) {
 		xhci_warn(xhci, "Command ring mismatch, dequeue = %p %llx (dma)\n",
 				xhci->cmd_ring->dequeue,
@@ -1227,8 +1226,6 @@ static void xhci_cmd_to_noop(struct xhci_hcd *xhci, struct xhci_cd *cur_cd)
 		return;
 	}
 
-=======
->>>>>>> d7a54f2... Linux 3.0.49
 	/* find the command trb matched by cd from command ring */
 	for (cmd_trb = xhci->cmd_ring->dequeue;
 			cmd_trb != xhci->cmd_ring->enqueue;

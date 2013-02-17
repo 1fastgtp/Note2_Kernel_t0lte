@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/cpu.h>
+#include <linux/hardirq.h>
 #include <linux/kernel.h>
 #include <linux/notifier.h>
 #include <linux/signal.h>
@@ -395,68 +396,14 @@ void VFP_bounce(u32 trigger, u32 fpexc, struct pt_regs *regs)
 
 static void vfp_enable(void *unused)
 {
-	u32 access = get_copro_access();
+	u32 access;
 
+	BUG_ON(preemptible());
+	access = get_copro_access();
 	/*
 	 * Enable full access to VFP (cp10 and cp11)
 	 */
 	set_copro_access(access | CPACC_FULL(10) | CPACC_FULL(11));
-}
-
-int vfp_flush_context(void)
-{
-	unsigned long flags;
-	struct thread_info *ti;
-	u32 fpexc;
-	u32 cpu;
-	int saved = 0;
-
-	local_irq_save(flags);
-
-	ti = current_thread_info();
-	fpexc = fmrx(FPEXC);
-	cpu = ti->cpu;
-
-#ifdef CONFIG_SMP
-	/* On SMP, if VFP is enabled, save the old state */
-	if ((fpexc & FPEXC_EN) && vfp_current_hw_state[cpu]) {
-		vfp_current_hw_state[cpu]->hard.cpu = cpu;
-#else
-	/* If there is a VFP context we must save it. */
-	if (vfp_current_hw_state[cpu]) {
-		/* Enable VFP so we can save the old state. */
-		fmxr(FPEXC, fpexc | FPEXC_EN);
-		isb();
-#endif
-		vfp_save_state(vfp_current_hw_state[cpu], fpexc);
-
-		/* disable, just in case */
-		fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
-		saved = 1;
-	} else if (vfp_current_hw_state[ti->cpu]) {
-#ifndef CONFIG_SMP
-		fmxr(FPEXC, fpexc | FPEXC_EN);
-		vfp_save_state(vfp_current_hw_state[ti->cpu], fpexc);
-		fmxr(FPEXC, fpexc);
-#endif
-	}
-	vfp_current_hw_state[cpu] = NULL;
-
-	/* clear any information we had about last context state */
-	vfp_current_hw_state[ti->cpu] = NULL;
-
-	local_irq_restore(flags);
-
-	return saved;
-}
-
-void vfp_reinit(void)
-{
-	/* ensure we have access to the vfp */
-	vfp_enable(NULL);
-
-	/* and disable it to ensure the next usage restores the state */
-	fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
 }
 
 #ifdef CONFIG_PM
@@ -464,14 +411,37 @@ void vfp_reinit(void)
 
 static int vfp_pm_suspend(void)
 {
-	vfp_flush_context();
+	struct thread_info *ti = current_thread_info();
+	u32 fpexc = fmrx(FPEXC);
+
+	/* if vfp is on, then save state for resumption */
+	if (fpexc & FPEXC_EN) {
+		printk(KERN_DEBUG "%s: saving vfp state\n", __func__);
+		vfp_save_state(&ti->vfpstate, fpexc);
+
+		/* disable, just in case */
+		fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
+	} else if (vfp_current_hw_state[ti->cpu]) {
+#ifndef CONFIG_SMP
+		fmxr(FPEXC, fpexc | FPEXC_EN);
+		vfp_save_state(vfp_current_hw_state[ti->cpu], fpexc);
+		fmxr(FPEXC, fpexc);
+#endif
+	}
+
+	/* clear any information we had about last context state */
+	vfp_current_hw_state[ti->cpu] = NULL;
 
 	return 0;
 }
 
 static void vfp_pm_resume(void)
 {
-	vfp_reinit();
+	/* ensure we have access to the vfp */
+	vfp_enable(NULL);
+
+	/* and disable it to ensure the next usage restores the state */
+	fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
 }
 
 static struct syscore_ops vfp_pm_syscore_ops = {
@@ -572,20 +542,9 @@ static int __init vfp_init(void)
 {
 	unsigned int vfpsid;
 	unsigned int cpu_arch = cpu_architecture();
-	struct cpumask cpus_curr, cpus;
-
-	sched_getaffinity(current->pid, &cpus_curr);
-	cpumask_clear(&cpus);
-	cpumask_set_cpu(smp_processor_id(), &cpus);
-
-	if (sched_setaffinity(current->pid, &cpus))
-		pr_err("%s: set CPU affinity failed.\n", __func__);
-	else
-		pr_err("%s : affinity set to CPU %d\n"\
-			, __func__, smp_processor_id());
 
 	if (cpu_arch >= CPU_ARCH_ARMv6)
-		vfp_enable(NULL);
+		on_each_cpu(vfp_enable, NULL, 1);
 
 	/*
 	 * First check that there is a VFP that we can use.
@@ -605,8 +564,6 @@ static int __init vfp_init(void)
 		printk("no double precision support\n");
 	} else {
 		hotcpu_notifier(vfp_hotplug, 0);
-
-		smp_call_function(vfp_enable, NULL, 1);
 
 		VFP_arch = (vfpsid & FPSID_ARCH_MASK) >> FPSID_ARCH_BIT;  /* Extract the architecture version */
 		printk("implementor %02x architecture %d part %02x variant %x rev %x\n",
@@ -652,18 +609,10 @@ static int __init vfp_init(void)
 			if ((fmrx(MVFR1) & 0x000fff00) == 0x00011100)
 				elf_hwcap |= HWCAP_NEON;
 #endif
-
-			if ((fmrx(MVFR1) & 0xf0000000) == 0x10000000 ||
-			    (read_cpuid_id() & 0xff00fc00) == 0x51000400)
+			if ((fmrx(MVFR1) & 0xf0000000) == 0x10000000)
 				elf_hwcap |= HWCAP_VFPv4;
 		}
 	}
-
-	if (sched_setaffinity(current->pid, &cpus_curr))
-		pr_err("%s: Restore CPU affinity failed !!\n", __func__);
-	else
-		pr_err("%s : affinity restored to %x\n" \
-			, __func__, *((int *)(cpus_curr.bits)));
 	return 0;
 }
 

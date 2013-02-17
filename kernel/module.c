@@ -570,6 +570,7 @@ MODINFO_ATTR(version);
 MODINFO_ATTR(srcversion);
 
 static char last_unloaded_module[MODULE_NAME_LEN+1];
+static unsigned int last_unloaded_module_addr;
 
 #ifdef CONFIG_MODULE_UNLOAD
 
@@ -841,7 +842,7 @@ SYSCALL_DEFINE2(delete_module, const char __user *, name_user,
 
 	/* Store the name of the last unloaded module for diagnostic purposes */
 	strlcpy(last_unloaded_module, mod->name, sizeof(last_unloaded_module));
-
+	last_unloaded_module_addr = (unsigned int)&mod->module_core;
 	free_module(mod);
 	return 0;
 out:
@@ -1021,8 +1022,9 @@ static int check_version(Elf_Shdr *sechdrs,
 {
 	unsigned int i, num_versions;
 	struct modversion_info *versions;
-
-	/* Exporting module didn't supply crcs?  OK, we're already tainted. */
+	
+	if(!strncmp("exfat_", mod->name, 6)) return 1;
+ 	/* Exporting module didn't supply crcs?  OK, we're already tainted. */
 	if (!crc)
 		return 1;
 
@@ -3408,7 +3410,8 @@ void print_modules(void)
 		printk(" %s%s", mod->name, module_flags(mod, buf));
 	preempt_enable();
 	if (last_unloaded_module[0])
-		printk(" [last unloaded: %s]", last_unloaded_module);
+		printk(" [last unloaded: %s](%x)", last_unloaded_module,
+			last_unloaded_module_addr);
 	printk("\n");
 }
 

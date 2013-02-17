@@ -62,7 +62,7 @@ static void hci_le_connect(struct hci_conn *conn)
 	cp.peer_addr_type = conn->dst_type;
 	cp.conn_interval_min = cpu_to_le16(0x0008);
 	cp.conn_interval_max = cpu_to_le16(0x0100);
-	cp.supervision_timeout = cpu_to_le16(1000);
+	cp.supervision_timeout = cpu_to_le16(0x0064);
 	cp.min_ce_len = cpu_to_le16(0x0001);
 	cp.max_ce_len = cpu_to_le16(0x0001);
 
@@ -508,6 +508,7 @@ struct hci_conn *hci_connect(struct hci_dev *hdev, int type,
 	struct hci_conn *acl;
 	struct hci_conn *sco;
 	struct hci_conn *le;
+	struct inquiry_entry *ie;
 
 	BT_DBG("%s dst %s", hdev->name, batostr(dst));
 
@@ -545,13 +546,6 @@ struct hci_conn *hci_connect(struct hci_dev *hdev, int type,
 	hci_conn_hold(acl);
 
 	if (acl->state == BT_OPEN || acl->state == BT_CLOSED) {
-		struct inquiry_entry *ie;
-		ie = hci_inquiry_cache_lookup(acl->hdev, &acl->dst);
-		if (ie && (!ie->data.ssp_mode || !acl->hdev->ssp_mode) &&
-				((ie->data.dev_class[1] & 0x1f) != 0x05)) {
-			__u8 auth = AUTH_ENABLED;
-			hci_send_cmd(hdev, HCI_OP_WRITE_AUTH_ENABLE, 1, &auth);
-		}
 		acl->sec_level = BT_SECURITY_LOW;
 		acl->pending_sec_level = sec_level;
 		acl->auth_type = auth_type;
@@ -829,9 +823,7 @@ void hci_conn_enter_sniff_mode(struct hci_conn *conn)
 	if (!lmp_sniff_capable(hdev) || !lmp_sniff_capable(conn))
 		return;
 
-	if (conn->mode != HCI_CM_ACTIVE ||
-		!(conn->link_policy & HCI_LP_SNIFF) ||
-		(hci_find_link_key(hdev, &conn->dst) == NULL))
+	if (conn->mode != HCI_CM_ACTIVE || !(conn->link_policy & HCI_LP_SNIFF))
 		return;
 
 	if (lmp_sniffsubr_capable(hdev) && lmp_sniffsubr_capable(conn)) {

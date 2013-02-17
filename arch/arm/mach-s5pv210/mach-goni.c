@@ -34,7 +34,6 @@
 
 #include <mach/map.h>
 #include <mach/regs-clock.h>
-#include <mach/regs-fb.h>
 
 #include <plat/gpio-cfg.h>
 #include <plat/regs-serial.h>
@@ -47,6 +46,7 @@
 #include <plat/sdhci.h>
 #include <plat/clock.h>
 #include <plat/s5p-time.h>
+#include <plat/regs-fb-v4.h>
 
 /* Following are default values for UCON, ULCON and UFCON UART registers */
 #define GONI_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
@@ -225,11 +225,6 @@ static void __init goni_radio_init(void)
 	gpio_direction_output(gpio, 1);
 }
 
-static u8 read_chg(void)
-{
-	return gpio_get_value(S5PV210_GPJ0(5));
-}
-
 /* TSP */
 static struct mxt_platform_data qt602240_platform_data = {
 	.x_line		= 17,
@@ -241,7 +236,6 @@ static struct mxt_platform_data qt602240_platform_data = {
 	.voltage	= 2800000,              /* 2.8V */
 	.orient		= MXT_DIAGONAL,
 	.irqflags	= IRQF_TRIGGER_FALLING,
-	.read_chg	= &read_chg,
 };
 
 static struct s3c2410_platform_i2c i2c2_data __initdata = {

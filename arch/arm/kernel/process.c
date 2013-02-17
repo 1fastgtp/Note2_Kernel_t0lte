@@ -154,9 +154,6 @@ void arm_machine_restart(char mode, const char *cmd)
 	/* Push out any further dirty data, and ensure cache is empty */
 	flush_cache_all();
 
-	/*Push out the dirty data from external caches */
-	outer_disable();
-
 	/*
 	 * Now call the architecture specific reboot code.
 	 */

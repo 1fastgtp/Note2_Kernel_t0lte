@@ -359,17 +359,8 @@ static bool usb_is_intel_switchable_ehci(struct pci_dev *pdev)
 		pdev->vendor == PCI_VENDOR_ID_INTEL &&
 		(pdev->device == 0x1E26 ||
 		 pdev->device == 0x8C2D ||
-<<<<<<< HEAD
-<<<<<<< HEAD
 		 pdev->device == 0x8C26 ||
 		 pdev->device == 0x9C26);
-=======
-		 pdev->device == 0x8C26);
->>>>>>> 57a0164... Linux 3.0.33
-=======
-		 pdev->device == 0x8C26 ||
-		 pdev->device == 0x9C26);
->>>>>>> 6aa0caf... Linux 3.0.58
 }
 
 static void ehci_enable_xhci_companion(void)

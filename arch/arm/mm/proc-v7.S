@@ -12,11 +12,12 @@
 #include <linux/init.h>
 #include <linux/linkage.h>
 #include <asm/assembler.h>
-#include <asm/domain.h>
 #include <asm/asm-offsets.h>
 #include <asm/hwcap.h>
 #include <asm/pgtable-hwdef.h>
 #include <asm/pgtable.h>
+
+#include <mach/smc.h>
 
 #include "proc-macros.S"
 
@@ -59,17 +60,17 @@ ENDPROC(cpu_v7_proc_fin)
  *	to what would be the reset vector.
  *
  *	- loc   - location to jump to for soft reset
+ *
+ *	This code must be executed using a flat identity mapping with
+ *      caches disabled.
  */
 	.align	5
 ENTRY(cpu_v7_reset)
-	mrc     p15, 0, r1, c1, c0, 0           @ ctrl register
-	bic     r1, r1, #0x0001                 @ ...............m
-        mcr     p15, 0, r1, c1, c0, 0           @ Turn off MMU
-        mcr     p15, 0, ip, c8, c7, 0           @ invalidate I & D,flush TLB
-        mcr     p15, 0, ip, c7, c5, 6           @ flush BTC
-        dsb
-        isb
-	mov     pc,r0
+	mrc	p15, 0, r1, c1, c0, 0		@ ctrl register
+	bic	r1, r1, #0x1			@ ...............m
+	mcr	p15, 0, r1, c1, c0, 0		@ disable MMU
+	isb
+	mov	pc, r0
 ENDPROC(cpu_v7_reset)
 
 /*
@@ -109,11 +110,6 @@ ENDPROC(cpu_v7_dcache_clean_area)
  */
 ENTRY(cpu_v7_switch_mm)
 #ifdef CONFIG_MMU
-#ifdef CONFIG_EMULATE_DOMAIN_MANAGER_V7
-	ldr	r2, =cpu_v7_switch_mm_private
-	b	emulate_domain_manager_switch_mm
-cpu_v7_switch_mm_private:
-#endif
 	mov	r2, #0
 	ldr	r1, [r1, #MM_CONTEXT_ID]	@ get mm->context.id
 	ALT_SMP(orr	r0, r0, #TTB_FLAGS_SMP)
@@ -123,12 +119,6 @@ cpu_v7_switch_mm_private:
 #endif
 #ifdef CONFIG_ARM_ERRATA_754322
 	dsb
-#endif
-#ifdef CONFIG_PID_IN_CONTEXTIDR
-	mrc	p15, 0, r2, c13, c0, 1		@ read current context ID
-	bic	r2, r2, #0xff			@ extract the PID
-	and	r1, r1, #0xff
-	orr	r1, r1, r2			@ insert the PID into r1
 #endif
 	mcr	p15, 0, r2, c13, c0, 1		@ set reserved context ID
 	isb
@@ -192,8 +182,7 @@ ENTRY(cpu_v7_set_pte_ext)
 	mov	pc, lr
 ENDPROC(cpu_v7_set_pte_ext)
 
-cpu_v7_name:
-	.ascii	"ARMv7 Processor"
+	string	cpu_v7_name, "ARMv7 Processor"
 	.align
 
 	/*
@@ -225,11 +214,7 @@ cpu_v7_name:
 	 *   NOS = PRRR[24+n] = 1	- not outer shareable
 	 */
 .equ	PRRR,	0xff0a81a8
-#if defined (CONFIG_ARCH_MSM_SCORPIONMP)
-.equ	NMRR,	0x40e080e0
-#else
 .equ	NMRR,	0x40e040e0
-#endif
 
 /* Suspend/resume support: derived from arch/arm/mach-s5pv210/sleep.S */
 .globl	cpu_v7_suspend_size
@@ -300,18 +285,18 @@ cpu_resume_l1_flags:
  */
 __v7_ca5mp_setup:
 __v7_ca9mp_setup:
-	mov     r10, #(1 << 0)                  @ TLB ops broadcasting
-	b       1f
+	mov	r10, #(1 << 0)			@ TLB ops broadcasting
+	b	1f
 __v7_ca15mp_setup:
-	mov     r10, #0
+	mov	r10, #0
 1:
 #ifdef CONFIG_SMP
-	ALT_SMP(mrc     p15, 0, r0, c1, c0, 1)
-	ALT_UP(mov      r0, #(1 << 6))          @ fake it for UP
+	ALT_SMP(mrc	p15, 0, r0, c1, c0, 1)
+	ALT_UP(mov	r0, #(1 << 6))		@ fake it for UP
 	tst	r0, #(1 << 6)			@ SMP/nAMP mode enabled?
-	orreq   r0, r0, #(1 << 6)               @ Enable SMP/nAMP mode
-	orreq   r0, r0, r10                     @ Enable CPU-specific SMP bits
-	mcreq   p15, 0, r0, c1, c0, 1
+	orreq	r0, r0, #(1 << 6)		@ Enable SMP/nAMP mode
+	orreq	r0, r0, r10			@ Enable CPU-specific SMP bits
+	mcreq	p15, 0, r0, c1, c0, 1
 #endif
 __v7_setup:
 	adr	r12, __v7_setup_stack		@ the local stack
@@ -352,12 +337,23 @@ __v7_setup:
 	orreq	r10, r10, #(1 << 22)		@ set the Write Allocate disable bit
 	mcreq	p15, 1, r10, c9, c0, 2		@ write the L2 cache aux ctrl register
 #endif
-	b	3f
+	b	4f
 
 	/* Cortex-A9 Errata */
 2:	ldr	r10, =0x00000c09		@ Cortex-A9 primary part number
 	teq	r0, r10
 	bne	3f
+#ifndef CONFIG_ARM_TRUSTZONE
+	cmp	r6, #0x10			@ power ctrl reg added r1p0
+	mrcge	p15, 0, r10, c15, c0, 0		@ read power control register
+	orrge	r10, r10, #1			@ enable dynamic clock gating
+	mcrge	p15, 0, r10, c15, c0, 0		@ write power control register
+#ifdef CONFIG_ARM_ERRATA_720791
+	teq	r5, #0x00100000			@ only present in r1p*
+	mrceq	p15, 0, r10, c15, c0, 2		@ read "chicken power ctrl" reg
+	orreq	r10, r10, #0x30			@ disable core clk gate on
+	mcreq	p15, 0, r10, c15, c0, 2		@ instr-side waits
+#endif
 #ifdef CONFIG_ARM_ERRATA_742230
 	cmp	r6, #0x22			@ only present up to r2p2
 	mrcle	p15, 0, r10, c15, c0, 1		@ read diagnostic register
@@ -373,6 +369,11 @@ __v7_setup:
 	orreq	r10, r10, #1 << 22		@ set bit #22
 	mcreq	p15, 0, r10, c15, c0, 1		@ write diagnostic register
 #endif
+#ifdef CONFIG_ARM_ERRATA_761320
+	mrc	p15, 0, r10, c15, c0, 1		@ read diagnostic register
+	orr	r10, r10, #1 << 21		@ set bit #21
+	mcr	p15, 0, r10, c15, c0, 1		@ write diagnostic register
+#endif
 #ifdef CONFIG_ARM_ERRATA_743622
 	teq	r5, #0x00200000			@ only present in r2p*
 	mrceq	p15, 0, r10, c15, c0, 1		@ read diagnostic register
@@ -385,8 +386,68 @@ __v7_setup:
 	orrlt	r10, r10, #1 << 11		@ set bit #11
 	mcrlt	p15, 0, r10, c15, c0, 1		@ write diagnostic register
 #endif
+#endif
+	b	4f
 
-3:	mov	r10, #0
+	/* Cortex-A15 Errata */
+3:	ldr	r10, =0x00000c0f		@ Cortex-A15 primary part number
+	teq	r0, r10
+	bne	4f
+
+#ifdef CONFIG_ARM_TRUSTZONE
+	stmia	r12, {r0-r3}
+	mov	r3, #0
+#endif
+#ifdef CONFIG_ARM_ERRATA_761171
+	teq	r6, #0x0			@ present in r0p0
+	teqne	r6, #0x1			@ present in r0p1
+	teqne	r6, #0x2			@ present in r0p2
+	mrceq	p15, 0, r10, c1, c0, 1		@ read aux control register
+	orreq	r10, r10, #3 << 27		@ set [28:27] bit
+#ifdef CONFIG_ARM_TRUSTZONE
+	ldreq	r0, =SMC_CMD_REG
+	ldreq	r1, =SMC_REG_ID_CP15(1, 0, 0, 1)
+	moveq	r2, r10
+	smceq	0
+#else
+	mcreq	p15, 0, r10, c1, c0, 1		@ write aux control register
+#endif
+#endif
+#ifdef CONFIG_ARM_ERRATA_762974
+	teq	r6, #0x0			@ present in r0p0
+	teqne	r6, #0x1			@ present in r0p1
+	teqne	r6, #0x2			@ present in r0p2
+	ldreq	r10, =0x400			@ disable l2 prefetch function
+#ifdef CONFIG_ARM_TRUSTZONE
+	ldreq	r0, =SMC_CMD_REG
+	ldreq	r1, =SMC_REG_ID_CP15(15, 1, 0, 3)
+	moveq	r2, r10
+	smceq	0
+#else
+	mcreq	p15, 1, r10, c15, c0, 3		@ write l2 prefetch ctrl register
+#endif
+#endif
+#ifdef CONFIG_ARM_ERRATA_763722
+	teq	r6, #0x0			@ present in r0p0
+	teqne	r6, #0x1			@ present in r0p1
+	teqne	r6, #0x2			@ present in r0p2
+	teqne	r6, #0x3			@ present in r0p3
+	mrceq	p15, 0, r10, c1, c0, 1		@ read aux control register
+	orreq	r10, r10, #15 << 25		@ set [28:25] bit
+#ifdef CONFIG_ARM_TRUSTZONE
+	ldreq	r0, =SMC_CMD_REG
+	ldreq	r1, =SMC_REG_ID_CP15(1, 0, 0, 1)
+	moveq	r2, r10
+	smceq	0
+#else
+	mcreq	p15, 0, r10, c1, c0, 1		@ write aux control register
+#endif
+#endif
+#ifdef CONFIG_ARM_TRUSTZONE
+	ldmia	r12, {r0-r3}
+#endif
+
+4:	mov	r10, #0
 	mcr	p15, 0, r10, c7, c5, 0		@ I+BTB cache invalidate
 	dsb
 #ifdef CONFIG_MMU
@@ -397,35 +458,6 @@ __v7_setup:
 	ALT_SMP(orr	r8, r8, #TTB_FLAGS_SMP)
 	ALT_UP(orr	r8, r8, #TTB_FLAGS_UP)
 	mcr	p15, 0, r8, c2, c0, 1		@ load TTB1
-#ifndef CONFIG_EMULATE_DOMAIN_MANAGER_V7
-	mov     r10, #0x1f                      @ domains 0, 1 = manager
-	mcr     p15, 0, r10, c3, c0, 0          @ load domain access register
-#endif
-#if defined(CONFIG_ARCH_MSM_SCORPION) && !defined(CONFIG_MSM_SMP)
-	mov     r0, #0x33
-	mcr     p15, 3, r0, c15, c0, 3          @ set L2CR1
-#endif
-#if defined (CONFIG_ARCH_MSM_SCORPION)
-	mrc     p15, 0, r0, c1, c0, 1           @ read ACTLR
-#ifdef CONFIG_CPU_CACHE_ERR_REPORT
-	orr     r0, r0, #0x37                   @ turn on L1/L2 error reporting
-#else
-	bic     r0, r0, #0x37
-#endif
-#if defined (CONFIG_ARCH_MSM_SCORPIONMP)
-	orr    r0, r0, #0x1 << 24     @ optimal setting for Scorpion MP
-#endif
-#ifndef CONFIG_ARCH_MSM_KRAIT
-	mcr     p15, 0, r0, c1, c0, 1           @ write ACTLR
-#endif
-#endif
-
-#if defined (CONFIG_ARCH_MSM_SCORPIONMP)
-	mrc     p15, 3, r0, c15, c0, 2  @ optimal setting for Scorpion MP
-	orr	    r0, r0, #0x1 << 21
-	mcr     p15, 3, r0, c15, c0, 2
-#endif
-
 	ldr	r5, =PRRR			@ PRRR
 	ldr	r6, =NMRR			@ NMRR
 	mcr	p15, 0, r5, c10, c2, 0		@ write PRRR
@@ -474,33 +506,17 @@ __v7_setup_stack:
 
 	__INITDATA
 
-	.type	v7_processor_functions, #object
-ENTRY(v7_processor_functions)
-	.word	v7_early_abort
-	.word	v7_pabort
-	.word	cpu_v7_proc_init
-	.word	cpu_v7_proc_fin
-	.word	cpu_v7_reset
-	.word	cpu_v7_do_idle
-	.word	cpu_v7_dcache_clean_area
-	.word	cpu_v7_switch_mm
-	.word	cpu_v7_set_pte_ext
-	.word	cpu_v7_suspend_size
-	.word	cpu_v7_do_suspend
-	.word	cpu_v7_do_resume
-	.size	v7_processor_functions, . - v7_processor_functions
+	@ define struct processor (see <asm/proc-fns.h> and proc-macros.S)
+#ifdef CONFIG_PM_SLEEP
+	define_processor_functions v7, dabort=v7_early_abort, pabort=v7_pabort, suspend=1
+#else
+	define_processor_functions v7, dabort=v7_early_abort, pabort=v7_pabort, suspend=0
+#endif
 
 	.section ".rodata"
 
-	.type	cpu_arch_name, #object
-cpu_arch_name:
-	.asciz	"armv7"
-	.size	cpu_arch_name, . - cpu_arch_name
-
-	.type	cpu_elf_name, #object
-cpu_elf_name:
-	.asciz	"v7"
-	.size	cpu_elf_name, . - cpu_elf_name
+	string	cpu_arch_name, "armv7"
+	string	cpu_elf_name, "v7"
 	.align
 
 	.section ".proc.info.init", #alloc, #execinstr
@@ -547,15 +563,15 @@ __v7_ca9mp_proc_info:
 	__v7_proc __v7_ca9mp_setup
 	.size	__v7_ca9mp_proc_info, . - __v7_ca9mp_proc_info
 
-        /*
+	/*
 	 * ARM Ltd. Cortex A15 processor.
 	 */
-	.type   __v7_ca15mp_proc_info, #object
+	.type	__v7_ca15mp_proc_info, #object
 __v7_ca15mp_proc_info:
-	.long   0x410fc0f0
-	.long   0xff0ffff0
+	.long	0x410fc0f0
+	.long	0xff0ffff0
 	__v7_proc __v7_ca15mp_setup, hwcaps = HWCAP_IDIV
-	.size   __v7_ca15mp_proc_info, . - __v7_ca15mp_proc_info
+	.size	__v7_ca15mp_proc_info, . - __v7_ca15mp_proc_info
 
 	/*
 	 * Match any ARMv7 processor core.

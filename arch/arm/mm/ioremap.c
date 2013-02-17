@@ -22,6 +22,7 @@
  */
 #include <linux/module.h>
 #include <linux/errno.h>
+#include <linux/memblock.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
 #include <linux/io.h>
@@ -204,12 +205,8 @@ void __iomem * __arm_ioremap_pfn_caller(unsigned long pfn,
 	/*
 	 * Don't allow RAM to be mapped - this causes problems with ARMv6+
 	 */
-	if (pfn_valid(pfn)) {
-		printk(KERN_WARNING "BUG: Your driver calls ioremap() on system memory.  This leads\n"
-		       KERN_WARNING "to architecturally unpredictable behaviour on ARMv6+, and ioremap()\n"
-		       KERN_WARNING "will fail in the next kernel release.  Please fix your driver.\n");
-		WARN_ON(1);
-	}
+	if (WARN_ON(memblock_is_memory(pfn << PAGE_SHIFT)))
+		return NULL;
 
 	type = get_mem_type(mtype);
 	if (!type)

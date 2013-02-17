@@ -4,6 +4,7 @@ config ARM
 	select HAVE_AOUT
 	select HAVE_DMA_API_DEBUG
 	select HAVE_IDE
+	select HAVE_DMA_CONTIGUOUS if (CPU_V6 || CPU_V6K || CPU_V7)
 	select HAVE_MEMBLOCK
 	select RTC_LIB
 	select SYS_SUPPORTS_APM_EMULATION
@@ -24,7 +25,7 @@ config ARM
 	select HAVE_PERF_EVENTS
 	select PERF_USE_VMALLOC
 	select HAVE_REGS_AND_STACK_ACCESS_API
-	#select HAVE_HW_BREAKPOINT if (PERF_EVENTS && (CPU_V6 || CPU_V6K || CPU_V7))
+	select HAVE_HW_BREAKPOINT if (PERF_EVENTS && (CPU_V6 || CPU_V6K || CPU_V7))
 	select HAVE_C_RECORDMCOUNT
 	select HAVE_GENERIC_HARDIRQS
 	select HAVE_SPARSE_IRQ
@@ -36,6 +37,9 @@ config ARM
 	  manufactured, but legacy ARM-based PC hardware remains popular in
 	  Europe.  There is an ARM Linux project with a web page at
 	  <http://www.arm.linux.org.uk/>.
+
+config ARM_HAS_SG_CHAIN
+	bool
 
 config HAVE_PWM
 	bool
@@ -62,7 +66,7 @@ config GENERIC_CLOCKEVENTS
 config GENERIC_CLOCKEVENTS_BROADCAST
 	bool
 	depends on GENERIC_CLOCKEVENTS
-	default y if SMP && !LOCAL_TIMERS
+	default y if SMP
 
 config KTIME_SCALAR
 	bool
@@ -110,7 +114,6 @@ config STACKTRACE_SUPPORT
 
 config HAVE_LATENCYTOP_SUPPORT
 	bool
-	depends on !SMP
 	default y
 
 config LOCKDEP_SUPPORT
@@ -131,17 +134,8 @@ config GENERIC_IRQ_PROBE
 
 config GENERIC_LOCKBREAK
 	bool
-	default y if !ARM_TICKET_LOCKS
+	default y
 	depends on SMP && PREEMPT
-
-config ARM_TICKET_LOCKS
-	bool
-	help
-	  Enable ticket locks, which help preserve fairness among
-	  contended locks and prevent livelock in multicore systems.
-	  Say 'y' if system stability is important.
-	default y if ARCH_MSM_SCORPIONMP || ARCH_MSM_KRAITMP
-	depends on SMP
 
 config RWSEM_GENERIC_SPINLOCK
 	bool
@@ -222,9 +216,8 @@ config ARM_PATCH_PHYS_VIRT_16BIT
 	  to allow physical memory down to a theoretical minimum of 64K
 	  boundaries.
 
-config GENERIC_BUG
+config ARCH_HIBERNATION_POSSIBLE
 	def_bool y
-	depends on BUG
 
 source "init/Kconfig"
 
@@ -640,11 +633,6 @@ config ARCH_MSM
 	select GENERIC_CLOCKEVENTS
 	select ARCH_REQUIRE_GPIOLIB
 	select CLKDEV_LOOKUP
-	select ARCH_HAS_CPUFREQ
-	select GENERIC_GPIO
-	select GENERIC_TIME
-	select GENERIC_ALLOCATOR
-	select HAVE_SCHED_CLOCK
 	help
 	  Support for Qualcomm MSM/QSD based systems.  This runs on the
 	  apps processor of the MSM/QSD and depends on a shared memory
@@ -779,19 +767,22 @@ config ARCH_S5PV210
 	help
 	  Samsung S5PV210/S5PC110 series based systems
 
-config ARCH_EXYNOS4
-	bool "Samsung EXYNOS4"
+config ARCH_EXYNOS
+	bool "Samsung EXYNOS"
 	select CPU_V7
-	select ARCH_SPARSEMEM_ENABLE
+	select ARCH_FLATMEM_ENABLE
 	select GENERIC_GPIO
 	select HAVE_CLK
+	select CLKDEV_LOOKUP
 	select ARCH_HAS_CPUFREQ
 	select GENERIC_CLOCKEVENTS
 	select HAVE_S3C_RTC if RTC_CLASS
 	select HAVE_S3C2410_I2C if I2C
 	select HAVE_S3C2410_WATCHDOG if WATCHDOG
+	select ARCH_HAS_OPP
+	select PM_OPP if PM
 	help
-	  Samsung EXYNOS4 series based systems
+	  Samsung EXYNOS series based systems
 
 config ARCH_SHARK
 	bool "Shark"
@@ -1005,7 +996,7 @@ source "arch/arm/mach-s5pc100/Kconfig"
 
 source "arch/arm/mach-s5pv210/Kconfig"
 
-source "arch/arm/mach-exynos4/Kconfig"
+source "arch/arm/mach-exynos/Kconfig"
 
 source "arch/arm/mach-shmobile/Kconfig"
 
@@ -1051,14 +1042,10 @@ config ARM_TIMER_SP804
 
 source arch/arm/mm/Kconfig
 
-config RESERVE_FIRST_PAGE
-	bool
-	default n
-	help
-	  Reserve the first page at PHYS_OFFSET. The first
-	  physical page is used by many platforms for warm
-	  boot operations. Reserve this page so that it is
-	  not allocated by the kernel.
+config ARM_PLD_SIZE
+	int
+	default 64 if ARCH_EXYNOS5
+	default 32
 
 config IWMMXT
 	bool "Enable iWMMXt support"
@@ -1190,6 +1177,16 @@ config ARM_ERRATA_720789
 	  tables. The workaround changes the TLB flushing routines to invalidate
 	  entries regardless of the ASID.
 
+config ARM_ERRATA_720791
+	bool "ARM errata: Dynamic high-level clock gating corrupts the Jazelle instruction stream"
+	depends on CPU_V7
+	help
+	  This option enables the workaround for the 720791 Cortex-A9
+	  (r1p0..r1p2) erratum.  The Jazelle instruction stream may be
+	  corrupted when dynamic high-level clock gating is enabled.
+	  This workaround disables gating the Core clock when the Instruction
+	  side is waiting for a Page Table Walk answer or linefill completion.
+
 config PL310_ERRATA_727915
 	bool "Background Clean & Invalidate by Way operation can cause data corruption"
 	depends on CACHE_L2X0
@@ -1261,29 +1258,29 @@ config ARM_ERRATA_754327
 	  This workaround defines cpu_relax() as smp_mb(), preventing correctly
 	  written polling loops from denying visibility of updates to memory.
 
-config PL310_ERRATA_727915
-	bool "Background Clean & Invalidate by Way operation can cause data corruption"
-	depends on CACHE_L2X0
+config ARM_ERRATA_761320
+	bool "ARM errata: no direct eviction"
+	depends on CPU_V7 && SMP
 	help
-	  PL310 implements the Clean & Invalidate by Way L2 cache maintenance
-	  operation (offset 0x7FC). This operation runs in background so that
-	  PL310 can handle normal accesses while it is in progress. Under very
-	  rare circumstances, due to this erratum, write data can be lost when
-	  PL310 treats a cacheable write transaction during a Clean &
-	  Invalidate by Way operation.
+	  This option enables the workaround for the 761320 Cortex-A9 erratum.
 
-config KSAPI
-        tristate "KSAPI support (EXPERIMENTAL)"
-	depends on ARCH_MSM_SCORPION || ARCH_MSM_KRAIT
-        default n
-        help
-          KSAPI: Performance monitoring tool for linux.
-          KSAPI records performance statistics for Snapdragon linux platform.
-          It uses the /proc FS as a means to exchange configuration data and
-          counter statistics. It can monitor the counter statistics for
-          Scorpion processor supported hardware performance counters on a per
-          thread basis or AXI counters on an overall system basis.
+config ARM_ERRATA_761171
+	bool "ARM errata: disable store streaming of mode 3"
+	depends on CPU_V7 && SMP
+	help
+	  This option enables the workaround for the 761171 Cortex-A15 erratum.
 
+config ARM_ERRATA_762974
+	bool "ARM errata: disable l2 prefetch"
+	depends on CPU_V7 && SMP
+	help
+	  This option enables the workaround for the 762964 Cortex-A15 erratum.
+
+config ARM_ERRATA_763722
+	bool "ARM errata: disable store streaming of mode 2 and mode 3"
+	depends on CPU_V7 && SMP
+	help
+	  This option enables the workaround for the 763722 Cortex-A15 erratum.
 endmenu
 
 source "arch/arm/common/Kconfig"
@@ -1370,10 +1367,10 @@ config SMP
 	depends on GENERIC_CLOCKEVENTS
 	depends on REALVIEW_EB_ARM11MP || REALVIEW_EB_A9MP || \
 		 MACH_REALVIEW_PB11MP || MACH_REALVIEW_PBX || ARCH_OMAP4 || \
-		 ARCH_EXYNOS4 || ARCH_TEGRA || ARCH_U8500 || ARCH_VEXPRESS_CA9X4 || \
-		 MSM_SMP || ARCH_SHMOBILE
+		 ARCH_EXYNOS || ARCH_TEGRA || ARCH_U8500 || ARCH_VEXPRESS_CA9X4 || \
+		 ARCH_MSM_SCORPIONMP || ARCH_SHMOBILE
 	select USE_GENERIC_SMP_HELPERS
-	select HAVE_ARM_SCU
+	select HAVE_ARM_SCU if !ARCH_MSM_SCORPIONMP
 	help
 	  This enables support for systems with more than one CPU. If you have
 	  a system with only one CPU, like most personal computers, say N. If
@@ -1410,12 +1407,6 @@ config HAVE_ARM_SCU
 	help
 	  This option enables support for the ARM system coherency unit
 
-config ARM_ARCH_TIMER
-	bool "Architected timer support"
-	select TICK_ONESHOT
-	help
-	  This option enables support for the ARM architected timer
-
 config HAVE_ARM_TWD
 	bool
 	depends on SMP
@@ -1450,7 +1441,7 @@ config NR_CPUS
 	int "Maximum number of CPUs (2-32)"
 	range 2 32
 	depends on SMP
-	default "2"
+	default "4"
 
 config HOTPLUG_CPU
 	bool "Support for hot-pluggable CPUs (EXPERIMENTAL)"
@@ -1461,11 +1452,9 @@ config HOTPLUG_CPU
 
 config LOCAL_TIMERS
 	bool "Use local timer interrupts"
-	depends on SMP && (REALVIEW_EB_ARM11MP || MACH_REALVIEW_PB11MP || \
-		REALVIEW_EB_A9MP || MACH_REALVIEW_PBX || ARCH_OMAP4 || ARCH_U8500 || \
-		MSM_SMP)
+	depends on SMP
 	default y
-	select HAVE_ARM_TWD if (!MSM_SMP && !EXYNOS4_MCT)
+	select HAVE_ARM_TWD if (!ARCH_MSM_SCORPIONMP && !EXYNOS_MCT)
 	help
 	  Enable support for local timers on SMP platforms, rather then the
 	  legacy IPI broadcast method.  Local timers allows the system
@@ -1477,7 +1466,8 @@ source kernel/Kconfig.preempt
 config HZ
 	int
 	default 200 if ARCH_EBSA110 || ARCH_S3C2410 || ARCH_S5P64X0 || \
-		ARCH_S5PV210 || ARCH_EXYNOS4
+		ARCH_S5PV210 || (ARCH_EXYNOS && !MACH_FPGA5410)
+	default 20 if MACH_FPGA5410
 	default OMAP_32K_TIMER_HZ if ARCH_OMAP && OMAP_32K_TIMER
 	default AT91_TIMER_HZ if ARCH_AT91
 	default SHMOBILE_TIMER_HZ if ARCH_SHMOBILE
@@ -1547,7 +1537,7 @@ config AEABI
 config OABI_COMPAT
 	bool "Allow old ABI binaries to run with this kernel (EXPERIMENTAL)"
 	depends on AEABI && EXPERIMENTAL && !THUMB2_KERNEL
-	default n
+	default y
 	help
 	  This option preserves the old syscall interface along with the
 	  new (ARM EABI) one. It also provides a compatibility layer to
@@ -1570,6 +1560,12 @@ config ARCH_SPARSEMEM_ENABLE
 config ARCH_SPARSEMEM_DEFAULT
 	def_bool ARCH_SPARSEMEM_ENABLE
 
+config ARCH_SELECT_MEMORY_MODEL
+	def_bool ARCH_SPARSEMEM_ENABLE
+
+config HAVE_ARCH_PFN_VALID
+	def_bool ARCH_HAS_HOLES_MEMORYMODEL || !SPARSEMEM
+
 config ARCH_SKIP_SECONDARY_CALIBRATE
 	bool "Skip secondary CPU calibration"
 	depends on SMP
@@ -1577,13 +1573,8 @@ config ARCH_SKIP_SECONDARY_CALIBRATE
 	  On some architectures, secondary cores shares clock with primiary
 	  core and hence scale together. Hence secondary core lpj calibration
 	  is not necessary and can be skipped to save considerable time.
+
 	  If unsure, say n.
-
-config ARCH_SELECT_MEMORY_MODEL
-	def_bool ARCH_SPARSEMEM_ENABLE
-
-config HAVE_ARCH_PFN_VALID
-	def_bool ARCH_HAS_HOLES_MEMORYMODEL || !SPARSEMEM
 
 config HIGHMEM
 	bool "High Memory Support"
@@ -1614,43 +1605,7 @@ config HW_PERF_EVENTS
 	  Enable hardware performance counter support for perf events. If
 	  disabled, perf events will use software events only.
 
-config VMALLOC_RESERVE
-	hex "Reserved vmalloc space"
-	default 0x08000000
-	depends on MMU
-	help
-	  Reserved vmalloc space if not specified on the kernel commandline.
-
 source "mm/Kconfig"
-
-config ARCH_MEMORY_PROBE
-	def_bool n
-
-config ARCH_MEMORY_REMOVE
-	def_bool n
-
-config ARCH_POPULATES_NODE_MAP
-	def_bool n
-
-config ENABLE_DMM
-	def_bool n
-
-config FIX_MOVABLE_ZONE
-	def_bool n
-
-config DONT_MAP_HOLE_AFTER_MEMBANK0
-	def_bool n
-	depends on SPARSEMEM
-
-config ARCH_ENABLE_MEMORY_HOTPLUG
-	def_bool n
-
-config ARCH_ENABLE_MEMORY_HOTREMOVE
-	def_bool n
-
-config HOLES_IN_ZONE
-	def_bool n
-	depends on SPARSEMEM
 
 config FORCE_MAX_ZONEORDER
 	int "Maximum zone order" if ARCH_SHMOBILE
@@ -1793,16 +1748,7 @@ config ARM_FLUSH_CONSOLE_ON_RESTART
 	  released if it failed to be acquired, which will cause all the
 	  pending messages to be flushed.
 
-config CP_ACCESS
-	tristate "CP register access tool"
-	default m
-	help
-	  Provide support for Coprocessor register access using /sys
-	  interface. Read and write to CP registers from userspace
-	  through sysfs interface. A sys file (cp_rw) will be created under
-	  /sys/devices/system/cpaccess/cpaccess0.
-
-	  If unsure, say N.
+source "arch/arm/mvp/Kconfig"
 
 endmenu
 
@@ -1812,7 +1758,6 @@ config USE_OF
 	bool "Flattened Device Tree support"
 	select OF
 	select OF_EARLY_FLATTREE
-	select IRQ_DOMAIN
 	help
 	  Include support for flattened device tree machine descriptions.
 
@@ -1860,38 +1805,6 @@ config ZBOOT_ROM_MMCIF
 	  Mask ROM will load the first part of the the ROM-able zImage
 	  which in turn loads the rest the kernel image to RAM using the
 	  MMCIF hardware block.
-
-config ARM_APPENDED_DTB
-	bool "Use appended device tree blob to zImage (EXPERIMENTAL)"
-	depends on OF && !ZBOOT_ROM && EXPERIMENTAL
-	help
-	  With this option, the boot code will look for a device tree binary
-	  (DTB) appended to zImage
-	  (e.g. cat zImage <filename>.dtb > zImage_w_dtb).
-
-	  This is meant as a backward compatibility convenience for those
-	  systems with a bootloader that can't be upgraded to accommodate
-	  the documented boot protocol using a device tree.
-
-	  Beware that there is very little in terms of protection against
-	  this option being confused by leftover garbage in memory that might
-	  look like a DTB header after a reboot if no actual DTB is appended
-	  to zImage.  Do not leave this option active in a production kernel
-	  if you don't intend to always append a DTB.  Proper passing of the
-	  location into r2 of a bootloader provided DTB is always preferable
-	  to this option.
-
-config ARM_ATAG_DTB_COMPAT
-	bool "Supplement the appended DTB with traditional ATAG information"
-	depends on ARM_APPENDED_DTB
-	help
-	  Some old bootloaders can't be updated to a DTB capable one, yet
-	  they provide ATAGs with memory configuration, the ramdisk address,
-	  the kernel cmdline string, etc.  Such information is dynamically
-	  provided by the bootloader and can't always be stored in a static
-	  DTB.  To allow a device tree enabled kernel to be used with such
-	  bootloaders, this option allows zImage to extract the information
-	  from the ATAG list and store it at run time into the appended DTB.
 
 config CMDLINE
 	string "Default kernel command string"
@@ -2098,14 +2011,6 @@ source "drivers/cpuidle/Kconfig"
 
 endmenu
 
-config CPU_FREQ_MSM
-        bool
-        depends on CPU_FREQ && ARCH_MSM
-        default y
-        help
-          This enables the CPUFreq driver for Qualcomm CPUs.
-          If in doubt, say Y.
-
 menu "Floating point emulation"
 
 comment "At least one emulation must be selected"
@@ -2195,7 +2100,7 @@ menu "Power management options"
 source "kernel/power/Kconfig"
 
 config ARCH_SUSPEND_POSSIBLE
-	depends on !ARCH_S5P64X0 && !ARCH_S5PC100 && !ARCH_FSM9XXX
+	depends on !ARCH_S5P64X0 && !ARCH_S5PC100
 	depends on CPU_ARM920T || CPU_ARM926T || CPU_SA1100 || \
 		CPU_V6 || CPU_V6K || CPU_V7 || CPU_XSC3 || CPU_XSCALE
 	def_bool y

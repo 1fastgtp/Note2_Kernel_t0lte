@@ -284,11 +284,11 @@ static int ecryptfs_initialize_file(struct dentry *ecryptfs_dentry)
 					fp_dentry->d_name.len + 1);
 
 		if ((mount_crypt_stat->flags & ECRYPTFS_ENABLE_NEW_PASSTHROUGH)
-		|| ((mount_crypt_stat->flags & ECRYPTFS_ENABLE_FILTERING) &&
+		    || ((mount_crypt_stat->flags & ECRYPTFS_ENABLE_FILTERING) &&
 			(is_file_name_match(mount_crypt_stat, fp_dentry) ||
 			is_file_ext_match(mount_crypt_stat, filename)))) {
 			crypt_stat->flags &= ~(ECRYPTFS_I_SIZE_INITIALIZED
-				| ECRYPTFS_ENCRYPTED);
+					| ECRYPTFS_ENCRYPTED);
 			ecryptfs_put_lower_file(ecryptfs_dentry->d_inode);
 		} else {
 			rc = ecryptfs_write_metadata(ecryptfs_dentry);

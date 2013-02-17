@@ -455,6 +455,12 @@ static void l2cap_chan_del(struct l2cap_chan *chan, int err)
 	if (chan->mode == L2CAP_MODE_ERTM) {
 		struct srej_list *l, *tmp;
 
+		/*
+		__clear_retrans_timer(chan);
+		__clear_monitor_timer(chan);
+		__clear_ack_timer(chan);
+		*/
+
 		skb_queue_purge(&chan->srej_q);
 
 		list_for_each_entry_safe(l, tmp, &chan->srej_l, list) {
@@ -1468,6 +1474,27 @@ static int l2cap_retransmit_frames(struct l2cap_chan *chan)
 	ret = l2cap_ertm_send(chan);
 	return ret;
 }
+/*
+static void l2cap_send_ack(struct l2cap_chan *chan)
+{
+	u16 control = 0;
+
+	control |= chan->buffer_seq << L2CAP_CTRL_REQSEQ_SHIFT;
+
+	if (test_bit(CONN_LOCAL_BUSY, &chan->conn_state)) {
+		control |= L2CAP_SUPER_RCV_NOT_READY;
+		set_bit(CONN_RNR_SENT, &chan->conn_state);
+		l2cap_send_sframe(chan, control);
+		return;
+	}
+
+	if (l2cap_ertm_send(chan) > 0)
+		return;
+
+	control |= L2CAP_SUPER_RCV_READY;
+	l2cap_send_sframe(chan, control);
+}
+*/
 
 static void __l2cap_send_ack(struct l2cap_chan *chan)
 {

@@ -1111,8 +1111,13 @@ static inline void hci_cs_inquiry(struct hci_dev *hdev, __u8 status)
 		hci_req_complete(hdev, HCI_OP_INQUIRY, status);
 		hci_conn_check_pending(hdev);
 		hci_dev_lock(hdev);
-		if (test_bit(HCI_MGMT, &hdev->dev_flags))
+		if (test_bit(HCI_MGMT, &hdev->dev_flags)) {
+			/* [GGSM/sc47.yun] P120828-6815. Discovery fail issue */
+			BT_ERR("Discovery can't be done with other commands");
+			hci_discovery_set_state(hdev, DISCOVERY_STOPPING);
+
 			mgmt_start_discovery_failed(hdev, status);
+		}
 		hci_dev_unlock(hdev);
 		return;
 	}
@@ -1313,7 +1318,7 @@ static void hci_check_pending_name(struct hci_dev *hdev, struct hci_conn *conn,
 	struct discovery_state *discov = &hdev->discovery;
 	struct inquiry_entry *e;
 
-	/* this event is for remote name & class update. actual connected event is sent from hci_conn_complete_evt */
+	/* this event is for remote name & class update.actual connected event is sent from hci_conn_complete_evt */
 	if (conn /*&& !test_and_set_bit(HCI_CONN_MGMT_CONNECTED, &conn->flags)*/)
 		mgmt_device_connected(hdev, bdaddr, ACL_LINK, 0x00,
 					name, name_len, conn->dev_class);
@@ -1898,6 +1903,18 @@ static inline void hci_auth_complete_evt(struct hci_dev *hdev, struct sk_buff *s
 		BT_DBG("Pin or key missing !!!");
 		return;
 	}
+
+	/* SS_BLUETOOTH(is80.hwang) 2012.05.18 */
+	/* for pin code request issue */
+#if defined(CONFIG_BT_CSR8811)
+	if (ev->status == 0x06 ) {
+		BT_ERR("Pin or key missing !!!");
+		hci_remove_link_key(hdev, &conn->dst);
+		hci_dev_unlock(hdev);
+		return ;
+	}
+#endif
+	/* SS_BLUEZ_BT(is80.hwang) End */
 
 	if (!ev->status) {
 		if (!(conn->ssp_mode > 0 && hdev->ssp_mode > 0) &&
@@ -2664,24 +2681,25 @@ static inline void hci_link_key_request_evt(struct hci_dev *hdev, struct sk_buff
 			BT_DBG("%s ignoring unauthenticated key", hdev->name);
 			goto not_found;
 		}
-
 		/* - This is mgmt only. hciops doesn't checking like this. -
-		* If device is pre 2.1 & security level is high, combination key type is required. (core spec 4.0 GAP 1671p)
+		* If device is pre 2.1 & security level is high, combination key type is required.
+		* (core spec 4.0 GAP 1671p)
 		* And 16 digit PIN is recommended. (but not mandatory)
 		* Now, Google API only support high & low level for outgoing.
 		* So if application use high level security, 16 digit PIN is needed. (mgmt based)
 		* But Google is still using hciops, There is no problem in their platform.
 		* This can make confusion to 3rd party developer.
-		* Disable this part for same action with hciops. and this should be checked after google's update.
+		* Disable this part for same action with hciops.
+		* and this should be checked after google's update.
 		*/
 		/*
 		*if (key->type == HCI_LK_COMBINATION && key->pin_len < 16 &&
-		*	conn->pending_sec_level == BT_SECURITY_HIGH) {
-		*BT_DBG("%s ignoring key unauthenticated for high \
-		*				security", hdev->name);
-		*goto not_found;
+		*		conn->pending_sec_level == BT_SECURITY_HIGH) {
+		*	BT_DBG("%s ignoring key unauthenticated for high \
+		*					security", hdev->name);
+		*	goto not_found;
+		*}
 		*/
-
 		conn->key_type = key->type;
 		conn->pin_length = key->pin_len;
 	}
@@ -2924,9 +2942,7 @@ static inline void hci_sync_conn_complete_evt(struct hci_dev *hdev, struct sk_bu
 	case 0x1c:	/* SCO interval rejected */
 	case 0x1a:	/* Unsupported Remote Feature */
 	case 0x1f:	/* Unspecified error */
-		if (conn->out && conn->attempt < 2) {
-			/* wbs */
-			if (!conn->hdev->is_wbs)
+		if (conn->out && conn->attempt < 2 && !conn->hdev->is_wbs) {
 				conn->pkt_type = (hdev->esco_type & SCO_ESCO_MASK) |
 					(hdev->esco_type & EDR_ESCO_MASK);
 			hci_setup_sync(conn, conn->link->handle);

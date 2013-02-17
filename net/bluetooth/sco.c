@@ -890,6 +890,11 @@ static void sco_conn_ready(struct sco_conn *conn)
 		bacpy(&bt_sk(sk)->src, conn->src);
 		bacpy(&bt_sk(sk)->dst, conn->dst);
 
+		if (!conn->hcon) {
+				BT_ERR("conn->hcon = NULL");
+				/* to do */
+		}
+
 		hci_conn_hold(conn->hcon);
 		__sco_chan_add(conn, sk, parent);
 
@@ -913,7 +918,7 @@ static int sco_connect_ind(struct hci_dev *hdev, bdaddr_t *bdaddr, __u8 type)
 	int lm = 0;
 
 	if (type != SCO_LINK && type != ESCO_LINK)
-		return 0;
+		return -EINVAL;
 
 	BT_DBG("hdev %s, bdaddr %s", hdev->name, batostr(bdaddr));
 

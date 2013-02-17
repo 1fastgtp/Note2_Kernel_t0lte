@@ -49,6 +49,9 @@
 #include <asm/mach/time.h>
 #include <asm/traps.h>
 #include <asm/unwind.h>
+#ifdef CONFIG_MIDAS_COMMON
+#include <plat/cpu.h>
+#endif
 
 #if defined(CONFIG_DEPRECATED_PARAM_STRUCT)
 #include "compat.h"
@@ -75,6 +78,9 @@ __setup("fpe=", fpe_setup);
 extern void paging_init(struct machine_desc *desc);
 extern void sanity_check_meminfo(void);
 extern void reboot_setup(char *str);
+#ifdef CONFIG_DMA_CMA
+extern void setup_dma_zone(struct machine_desc *desc);
+#endif
 
 unsigned int processor_id;
 EXPORT_SYMBOL(processor_id);
@@ -97,8 +103,6 @@ EXPORT_SYMBOL(system_serial_high);
 unsigned int elf_hwcap __read_mostly;
 EXPORT_SYMBOL(elf_hwcap);
 
-unsigned int boot_reason;
-EXPORT_SYMBOL(boot_reason);
 
 #ifdef MULTI_CPU
 struct processor processor __read_mostly;
@@ -132,10 +136,7 @@ static const char *cpu_name;
 static const char *machine_name;
 static char __initdata cmd_line[COMMAND_LINE_SIZE];
 struct machine_desc *machine_desc __initdata;
-#ifdef CONFIG_SEC_DEBUG_SUBSYS
-const char *unit_name;
-EXPORT_SYMBOL(unit_name);
-#endif
+
 static char default_command_line[COMMAND_LINE_SIZE] __initdata = CONFIG_CMDLINE;
 static union { char c[4]; unsigned long l; } endian_test __initdata = { { 'l', '?', '?', 'b' } };
 #define ENDIANNESS ((char)endian_test.l)
@@ -891,8 +892,9 @@ void __init setup_arch(char **cmdline_p)
 		mdesc = setup_machine_tags(machine_arch_type);
 	machine_desc = mdesc;
 	machine_name = mdesc->name;
-#ifdef CONFIG_SEC_DEBUG_SUBSYS
-	unit_name = machine_name;
+
+#ifdef CONFIG_DMA_CMA
+	setup_dma_zone(mdesc);
 #endif
 	if (mdesc->soft_reboot)
 		reboot_setup("s");
@@ -907,9 +909,6 @@ void __init setup_arch(char **cmdline_p)
 	*cmdline_p = cmd_line;
 
 	parse_early_param();
-
-	if (mdesc->init_very_early)
-		mdesc->init_very_early();
 
 	sanity_check_meminfo();
 	arm_memblock_init(&meminfo, mdesc);
@@ -1051,6 +1050,10 @@ static int c_show(struct seq_file *m, void *v)
 
 	seq_puts(m, "\n");
 
+#ifdef CONFIG_MIDAS_COMMON
+	if (soc_is_exynos4412())
+		seq_printf(m, "Chip revision\t: %04x\n", samsung_rev());
+#endif
 	seq_printf(m, "Hardware\t: %s\n", machine_name);
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
 	seq_printf(m, "Serial\t\t: %08x%08x\n",

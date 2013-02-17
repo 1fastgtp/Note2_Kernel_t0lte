@@ -646,6 +646,11 @@ int hci_dev_open(__u16 dev)
 
 	hci_req_lock(hdev);
 
+	if (test_bit(HCI_UNREGISTER, &hdev->flags)) {
+		ret = -ENODEV;
+		goto done;
+	}
+
 	if (hdev->rfkill && rfkill_blocked(hdev->rfkill)) {
 		ret = -ERFKILL;
 		goto done;
@@ -1864,6 +1869,7 @@ int hci_register_dev(struct hci_dev *hdev)
 	}
 	set_bit(HCI_AUTO_OFF, &hdev->dev_flags);
 	set_bit(HCI_SETUP, &hdev->dev_flags);
+
 	hci_notify(hdev, HCI_DEV_REG);
 	schedule_work(&hdev->power_on);
 
@@ -1886,6 +1892,8 @@ int hci_unregister_dev(struct hci_dev *hdev)
 	int i;
 
 	BT_DBG("%p name %s bus %d", hdev, hdev->name, hdev->bus);
+
+	set_bit(HCI_UNREGISTER, &hdev->flags);
 
 	write_lock_bh(&hci_dev_list_lock);
 	list_del(&hdev->list);
@@ -1952,9 +1960,7 @@ int hci_resume_dev(struct hci_dev *hdev)
 }
 EXPORT_SYMBOL(hci_resume_dev);
 
-#ifdef CONFIG_BT_HCIUART
 extern void hci_uart_tty_read_hook(struct sk_buff *skb);
-#endif
 
 /* Receive frame from HCI drivers */
 int hci_recv_frame(struct sk_buff *skb)
@@ -1962,9 +1968,7 @@ int hci_recv_frame(struct sk_buff *skb)
 	struct hci_dev *hdev = (struct hci_dev *) skb->dev;
 	if (!hdev || (!test_bit(HCI_UP, &hdev->flags)
 				&& !test_bit(HCI_INIT, &hdev->flags))) {
-#ifdef CONFIG_BT_HCIUART
 		hci_uart_tty_read_hook(skb);
-#endif
 		kfree_skb(skb);
 		return -ENXIO;
 	}
@@ -2283,6 +2287,21 @@ int hci_send_cmd(struct hci_dev *hdev, __u16 opcode, __u32 plen, void *param)
 void *hci_sent_cmd_data(struct hci_dev *hdev, __u16 opcode)
 {
 	struct hci_command_hdr *hdr;
+
+	/* SS_BLUETOOTH(is80.hwang) 2012.05.16 */
+	/*Check null pointer and opcode */
+	#if defined(CONFIG_BT_CSR8811)
+	if (hdev == NULL) {
+		BT_ERR("hci_sent_cmd_opcode:: hdev=NULL, opcode=0x%x", opcode);
+		return NULL;
+	}
+
+	if (hdev->sent_cmd->data == NULL) {
+		BT_ERR("hci_sent_cmd_opcode:: hdev->sent_cmd->data=NULL opcode=0x%x", opcode);
+		return NULL;
+	}
+	#endif
+	/* SS_BLUEZ_BT(is80.hwang) End */
 
 	if (!hdev->sent_cmd)
 		return NULL;

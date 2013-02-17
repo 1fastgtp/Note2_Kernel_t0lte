@@ -250,7 +250,7 @@ static int ecryptfs_open(struct inode *inode, struct file *file)
 			&& (crypt_stat->flags & ECRYPTFS_ENCRYPTED)) {
 		if (ecryptfs_read_metadata(ecryptfs_dentry)) {
 			crypt_stat->flags &= ~(ECRYPTFS_I_SIZE_INITIALIZED
-					| ECRYPTFS_ENCRYPTED);
+					       | ECRYPTFS_ENCRYPTED);
 			mutex_unlock(&crypt_stat->cs_mutex);
 			goto out;
 		}

@@ -76,9 +76,8 @@
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
 #include <asm/mutex.h>
-#if CONFIG_SEC_DEBUG
+
 #include <mach/sec_debug.h>
-#endif
 
 #include "sched_cpupri.h"
 #include "workqueue_sched.h"
@@ -2363,7 +2362,7 @@ unsigned long wait_task_inactive(struct task_struct *p, long match_state)
 		 * yield - it could be a while.
 		 */
 		if (unlikely(on_rq)) {
-			ktime_t to = ktime_set(0, NSEC_PER_MSEC);
+			ktime_t to = ktime_set(0, NSEC_PER_SEC/HZ);
 
 			set_current_state(TASK_UNINTERRUPTIBLE);
 			schedule_hrtimeout(&to, HRTIMER_MODE_REL);
@@ -3227,6 +3226,13 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	finish_task_switch(this_rq(), prev);
 }
 
+unsigned long get_cpu_nr_running(unsigned int cpu)
+{
+    if(cpu < NR_CPUS)
+        return cpu_rq(cpu)->nr_running;
+    else
+        return 0;
+}
 /*
  * nr_running, nr_uninterruptible and nr_context_switches:
  *
@@ -4214,6 +4220,8 @@ EXPORT_SYMBOL(sub_preempt_count);
  */
 static noinline void __schedule_bug(struct task_struct *prev)
 {
+	struct pt_regs *regs = get_irq_regs();
+
 	printk(KERN_ERR "BUG: scheduling while atomic: %s/%d/0x%08x\n",
 		prev->comm, prev->pid, preempt_count());
 
@@ -4221,7 +4229,11 @@ static noinline void __schedule_bug(struct task_struct *prev)
 	print_modules();
 	if (irqs_disabled())
 		print_irqtrace_events(prev);
-	dump_stack();
+
+	if (regs)
+		show_regs(regs);
+	else
+		dump_stack();
 }
 
 /*
@@ -4349,12 +4361,10 @@ need_resched:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
-#if CONFIG_SEC_DEBUG
-		sec_debug_task_sched_log(cpu, rq->curr);
-#endif
 	} else
 		raw_spin_unlock_irq(&rq->lock);
 
+	sec_debug_task_log(cpu, rq->curr);
 	post_schedule(rq);
 
 	preempt_enable_no_resched();
@@ -4481,7 +4491,6 @@ asmlinkage void __sched preempt_schedule_irq(void)
 
 	do {
 		add_preempt_count(PREEMPT_ACTIVE);
-		secdbg_sched_msg(">prmptsched_irq");
 		local_irq_enable();
 		__schedule();
 		local_irq_disable();
@@ -4651,7 +4660,7 @@ void complete_all(struct completion *x)
 EXPORT_SYMBOL(complete_all);
 
 static inline long __sched
-do_wait_for_common(struct completion *x, long timeout, int state, int iowait)
+do_wait_for_common(struct completion *x, long timeout, int state)
 {
 	if (!x->done) {
 		DECLARE_WAITQUEUE(wait, current);
@@ -4664,10 +4673,7 @@ do_wait_for_common(struct completion *x, long timeout, int state, int iowait)
 			}
 			__set_current_state(state);
 			spin_unlock_irq(&x->wait.lock);
-			if (iowait)
-				timeout = io_schedule_timeout(timeout);
-			else
-				timeout = schedule_timeout(timeout);
+			timeout = schedule_timeout(timeout);
 			spin_lock_irq(&x->wait.lock);
 		} while (!x->done && timeout);
 		__remove_wait_queue(&x->wait, &wait);
@@ -4679,12 +4685,12 @@ do_wait_for_common(struct completion *x, long timeout, int state, int iowait)
 }
 
 static long __sched
-wait_for_common(struct completion *x, long timeout, int state, int iowait)
+wait_for_common(struct completion *x, long timeout, int state)
 {
 	might_sleep();
 
 	spin_lock_irq(&x->wait.lock);
-	timeout = do_wait_for_common(x, timeout, state, iowait);
+	timeout = do_wait_for_common(x, timeout, state);
 	spin_unlock_irq(&x->wait.lock);
 	return timeout;
 }
@@ -4701,22 +4707,9 @@ wait_for_common(struct completion *x, long timeout, int state, int iowait)
  */
 void __sched wait_for_completion(struct completion *x)
 {
-	wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE, 0);
+	wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion);
-
-/**
- * wait_for_completion_io: - waits for completion of a task
- * @x:  holds the state of this particular completion
- *
- * This waits for completion of a specific task to be signaled. Treats any
- * sleeping as waiting for IO for the purposes of process accounting.
- */
-void __sched wait_for_completion_io(struct completion *x)
-{
-	wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE, 1);
-}
-EXPORT_SYMBOL(wait_for_completion_io);
 
 /**
  * wait_for_completion_timeout: - waits for completion of a task (w/timeout)
@@ -4730,7 +4723,7 @@ EXPORT_SYMBOL(wait_for_completion_io);
 unsigned long __sched
 wait_for_completion_timeout(struct completion *x, unsigned long timeout)
 {
-	return wait_for_common(x, timeout, TASK_UNINTERRUPTIBLE, 0);
+	return wait_for_common(x, timeout, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion_timeout);
 
@@ -4743,8 +4736,7 @@ EXPORT_SYMBOL(wait_for_completion_timeout);
  */
 int __sched wait_for_completion_interruptible(struct completion *x)
 {
-	long t =
-	  wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_INTERRUPTIBLE, 0);
+	long t = wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_INTERRUPTIBLE);
 	if (t == -ERESTARTSYS)
 		return t;
 	return 0;
@@ -4763,7 +4755,7 @@ long __sched
 wait_for_completion_interruptible_timeout(struct completion *x,
 					  unsigned long timeout)
 {
-	return wait_for_common(x, timeout, TASK_INTERRUPTIBLE, 0);
+	return wait_for_common(x, timeout, TASK_INTERRUPTIBLE);
 }
 EXPORT_SYMBOL(wait_for_completion_interruptible_timeout);
 
@@ -4776,7 +4768,7 @@ EXPORT_SYMBOL(wait_for_completion_interruptible_timeout);
  */
 int __sched wait_for_completion_killable(struct completion *x)
 {
-	long t = wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_KILLABLE, 0);
+	long t = wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_KILLABLE);
 	if (t == -ERESTARTSYS)
 		return t;
 	return 0;
@@ -4796,7 +4788,7 @@ long __sched
 wait_for_completion_killable_timeout(struct completion *x,
 				     unsigned long timeout)
 {
-	return wait_for_common(x, timeout, TASK_KILLABLE, 0);
+	return wait_for_common(x, timeout, TASK_KILLABLE);
 }
 EXPORT_SYMBOL(wait_for_completion_killable_timeout);
 
@@ -5789,7 +5781,6 @@ long __sched io_schedule_timeout(long timeout)
 	delayacct_blkio_end();
 	return ret;
 }
-EXPORT_SYMBOL(io_schedule_timeout);
 
 /**
  * sys_sched_get_priority_max - return maximum RT priority.
@@ -5912,7 +5903,14 @@ void sched_show_task(struct task_struct *p)
 	printk(KERN_CONT "%5lu %5d %6d 0x%08lx\n", free,
 		task_pid_nr(p), task_pid_nr(p->real_parent),
 		(unsigned long)task_thread_info(p)->flags);
-
+#ifdef CONFIG_LOWMEM_CHECK
+	if (p->mm != NULL)
+		printk(KERN_INFO "file page total: %lu lowmem: %lu, anon page total: %lu lowmem: %lu \n",
+			get_mm_counter(p->mm, MM_FILEPAGES),
+			get_mm_counter(p->mm, MM_FILE_LOWPAGES),
+			get_mm_counter(p->mm, MM_ANONPAGES),
+			get_mm_counter(p->mm, MM_ANON_LOWPAGES));
+#endif
 	show_stack(p, NULL);
 }
 
@@ -8107,12 +8105,8 @@ void __init sched_init(void)
 	int i, j;
 	unsigned long alloc_size = 0, ptr;
 
-#ifdef CONFIG_SEC_DEBUG
-#ifdef CONFIG_FAIR_GROUP_SCHED
 	sec_gaf_supply_rqinfo(offsetof(struct rq, curr),
-					offsetof(struct cfs_rq, rq));
-#endif
-#endif
+			      offsetof(struct cfs_rq, rq));
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	alloc_size += 2 * nr_cpu_ids * sizeof(void **);
@@ -9082,15 +9076,6 @@ cpu_cgroup_allow_attach(struct cgroup *cgrp, struct task_struct *tsk)
 static int
 cpu_cgroup_can_attach_task(struct cgroup *cgrp, struct task_struct *tsk)
 {
-	if ((current != tsk) && (!capable(CAP_SYS_NICE))) {
-		const struct cred *cred = current_cred(), *tcred;
-
-		tcred = __task_cred(tsk);
-
-		if (cred->euid != tcred->uid && cred->euid != tcred->suid)
-			return -EPERM;
-	}
-
 #ifdef CONFIG_RT_GROUP_SCHED
 	if (!sched_rt_can_attach(cgroup_tg(cgrp), tsk))
 		return -EINVAL;

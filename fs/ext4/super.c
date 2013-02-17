@@ -2204,7 +2204,9 @@ static void ext4_orphan_cleanup(struct super_block *sb,
 				__func__, inode->i_ino, inode->i_size);
 			jbd_debug(2, "truncating inode %lu to %lld bytes\n",
 				  inode->i_ino, inode->i_size);
+			mutex_lock(&inode->i_mutex);
 			ext4_truncate(inode);
+			mutex_unlock(&inode->i_mutex);
 			nr_truncates++;
 		} else {
 			ext4_msg(sb, KERN_DEBUG,
@@ -4445,7 +4447,7 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 	}
 
 	ext4_setup_system_zone(sb);
-	if (sbi->s_journal == NULL)
+	if (sbi->s_journal == NULL && !(old_sb_flags & MS_RDONLY))
 		ext4_commit_super(sb, 1);
 
 #ifdef CONFIG_QUOTA
@@ -4845,7 +4847,7 @@ void print_block_data(struct super_block *sb, sector_t blocknr, unsigned char *d
 	char row_hex[50] = { 0, };
 	char ch;
 
-	printk(KERN_ERR "As EXT4-fs error, printing data in hex\n"); 
+	printk(KERN_ERR "As EXT4-fs error, printing data in hex\n");
 	printk(KERN_ERR " [partition info] s_id : %s, start block# : %llu\n", sb->s_id, sb->s_bdev->bd_part->start_sect);
 	printk(KERN_ERR " dump block# : %llu, start offset(byte) : %d, length(byte) : %d\n", blocknr, start, len);
 	printk(KERN_ERR "-----------------------------------------------------------------------------\n");
@@ -4862,7 +4864,7 @@ void print_block_data(struct super_block *sb, sector_t blocknr, unsigned char *d
 				else
 					sprintf(row_data + j, ".");
 
-				sprintf(row_hex + (j * 3), "%2.2x ", ch); 
+				sprintf(row_hex + (j * 3), "%2.2x ", ch);
 			}
 			else
 			{

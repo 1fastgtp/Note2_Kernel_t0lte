@@ -108,17 +108,6 @@ bool early_boot_irqs_disabled __read_mostly;
 enum system_states system_state __read_mostly;
 EXPORT_SYMBOL(system_state);
 
-#ifdef CONFIG_SAMSUNG_LPM_MODE
-int poweroff_charging;
-#endif /* CONFIG_SAMSUNG_LPM_MODE */
-
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-#define USB_STRING_MAX	31
-char usb_string_temp[USB_STRING_MAX];
-char usb_string_name[USB_STRING_MAX + 1];
-EXPORT_SYMBOL(usb_string_name);
-#endif /* CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE */
-
 /*
  * Boot command-line arguments
  */
@@ -358,7 +347,6 @@ static __initdata DECLARE_COMPLETION(kthreadd_done);
 static noinline void __init_refok rest_init(void)
 {
 	int pid;
-	const struct sched_param param = { .sched_priority = 1 };
 
 	rcu_scheduler_starting();
 	/*
@@ -372,7 +360,6 @@ static noinline void __init_refok rest_init(void)
 	rcu_read_lock();
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);
 	rcu_read_unlock();
-	sched_setscheduler_nocheck(kthreadd_task, SCHED_FIFO, &param);
 	complete(&kthreadd_done);
 
 	/*
@@ -404,20 +391,6 @@ static int __init do_early_param(char *param, char *val)
 		}
 	}
 	/* We accept everything at this stage. */
-#ifdef CONFIG_SAMSUNG_LPM_MODE
-	/* check power off charging */
-	if ((strncmp(param, "androidboot.bootchg", 19) == 0)) {
-		if (strncmp(val, "true", 4) == 0)
-			poweroff_charging = 1;
-	}
-#endif
-
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-	if ((strncmp(param, "samsung.hardware", 16) == 0)) {
-		strlcpy(usb_string_temp, val, USB_STRING_MAX);
-		sprintf(usb_string_name, "_%s", usb_string_temp);
-	}
-#endif
 	return 0;
 }
 
@@ -575,9 +548,6 @@ asmlinkage void __init start_kernel(void)
 				 "enabled early\n");
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
-
-	/* Interrupts are enabled now so all GFP allocations are safe. */
-	gfp_allowed_mask = __GFP_BITS_MASK;
 
 	kmem_cache_init_late();
 
@@ -759,8 +729,10 @@ static void __init do_pre_smp_initcalls(void)
 
 static void run_init_process(const char *init_filename)
 {
+	int ret = 0;
 	argv_init[0] = init_filename;
-	kernel_execve(init_filename, argv_init, envp_init);
+	ret = kernel_execve(init_filename, argv_init, envp_init);
+	pr_info("run_init_process Ret : %d\n", ret);
 }
 
 /* This is a non __init function. Force it to be noinline otherwise gcc
@@ -810,6 +782,10 @@ static int __init kernel_init(void * unused)
 	 * Wait until kthreadd is all set-up.
 	 */
 	wait_for_completion(&kthreadd_done);
+
+	/* Now the scheduler is fully set up and can do blocking allocations */
+	gfp_allowed_mask = __GFP_BITS_MASK;
+
 	/*
 	 * init can allocate pages on any node
 	 */

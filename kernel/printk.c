@@ -41,18 +41,9 @@
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <linux/rculist.h>
-#include <mach/msm_rtb.h>
-#include <asm/uaccess.h>
-#ifdef CONFIG_SEC_DEBUG
-#include <mach/sec_debug.h>
-#include <linux/io.h>
-#endif
 
-#ifdef LOCAL_CONFIG_PRINT_EXTRA_INFO
-#define EXTRA_BUF_SIZE (TASK_COMM_LEN+16)
-#else
-#define EXTRA_BUF_SIZE 0
-#endif
+#include <asm/uaccess.h>
+#include <mach/sec_debug.h>
 
 /*
  * Architectures can override it:
@@ -62,6 +53,10 @@ void asmlinkage __attribute__((weak)) early_printk(const char *fmt, ...)
 }
 
 #define __LOG_BUF_LEN	(1 << CONFIG_LOG_BUF_SHIFT)
+
+#ifdef        CONFIG_DEBUG_LL
+extern void printascii(char *);
+#endif
 
 /* printk's without a loglevel use this.. */
 #define DEFAULT_MESSAGE_LOGLEVEL CONFIG_DEFAULT_MESSAGE_LOGLEVEL
@@ -154,18 +149,12 @@ static int console_may_schedule;
 
 #ifdef CONFIG_PRINTK
 
-static char __log_buf[__LOG_BUF_LEN];
+static char __log_buf[__LOG_BUF_LEN] __nosavedata;
 static char *log_buf = __log_buf;
 static int log_buf_len = __LOG_BUF_LEN;
 static unsigned logged_chars; /* Number of chars produced since last read+clear operation */
 static int saved_console_loglevel = -1;
-#ifdef CONFIG_SEC_SSR_DUMP
-/*
- * variable to hold the ioremap address of kernel log buffer,
- * which is reused in ramdump.c
- */
-unsigned *ramdump_kernel_log_addr;
-#endif
+
 #ifdef CONFIG_KEXEC
 /*
  * This appends the listed symbols to /proc/vmcoreinfo
@@ -201,165 +190,6 @@ static int __init log_buf_len_setup(char *str)
 }
 early_param("log_buf_len", log_buf_len_setup);
 
-#ifdef CONFIG_SEC_DEBUG
-#define CONFIG_PRINTK_NOCACHE
-/*
- * Example usage: sec_log=256K@0x45000000
- *
- * In above case, log_buf size is 256KB and its physical base address
- * is 0x45000000. Actually, *(int *)(base - 8) is log_magic and *(int
- * *)(base - 4) is log_ptr. Therefore we reserve (size + 8) bytes from
- * (base - 8)
- */
-#define LOG_MAGIC 0x4d474f4c /* "LOGM" */
-
-/* These variables are also protected by logbuf_lock */
-static unsigned *sec_log_ptr;
-static char *sec_log_buf;
-static unsigned sec_log_size;
-
-#ifdef CONFIG_PRINTK_NOCACHE
-static unsigned sec_log_save_size;
-static unsigned long long sec_log_save_base;
-unsigned long long sec_log_reserve_base;
-unsigned sec_log_reserve_size;
-unsigned int *sec_log_irq_en;
-#endif
-static inline void emit_sec_log_char(char c)
-{
-	if (sec_log_buf && sec_log_ptr) {
-		sec_log_buf[*sec_log_ptr & (sec_log_size - 1)] = c;
-		(*sec_log_ptr)++;
-	}
-}
-
-
-#ifdef CONFIG_SEC_DEBUG_SUBSYS
-void sec_debug_subsys_set_kloginfo(unsigned int *idx_paddr,
-	unsigned int *log_paddr, unsigned int *size)
-{
-	*idx_paddr = (unsigned int)&log_end -
-		CONFIG_PAGE_OFFSET + CONFIG_PHYS_OFFSET;
-	*log_paddr = (unsigned int)__log_buf -
-		CONFIG_PAGE_OFFSET + CONFIG_PHYS_OFFSET;
-	*size = __LOG_BUF_LEN;
-}
-#endif
-
-
-#ifdef CONFIG_PRINTK_NOCACHE
-static int __init printk_remap_nocache(void)
-{
-	void __iomem *nocache_base = 0;
-	unsigned *sec_log_mag;
-	unsigned long flags;
-	unsigned start;
-	int rc = 0;
-
-	sec_getlog_supply_kloginfo(log_buf);
-
-	if (0 == sec_debug_is_enabled()) {
-#ifdef CONFIG_SEC_SSR_DUMP
-		nocache_base = ioremap_nocache(sec_log_save_base - 4096,
-		sec_log_save_size + 8192);
-		nocache_base = nocache_base + 4096;
-		sec_log_mag = nocache_base - 8;
-		sec_log_ptr = nocache_base - 4;
-		sec_log_buf = nocache_base;
-		ramdump_kernel_log_addr = sec_log_ptr;
-		pr_debug("ramdump_kernel_log_addr = 0x%x\n",
-		ramdump_kernel_log_addr);
-		sec_log_size = sec_log_save_size;
-		sec_log_irq_en = nocache_base - 0xC ;
-#endif
-
-#ifdef CONFIG_SEC_DEBUG_LOW_LOG
-		nocache_base = ioremap_nocache(sec_log_save_base - 4096,
-		sec_log_save_size + 8192);
-		nocache_base = nocache_base + 4096;
-
-		sec_log_mag = nocache_base - 8;
-		sec_log_ptr = nocache_base - 4;
-		sec_log_buf = nocache_base;
-		sec_log_size = sec_log_save_size;
-		sec_log_irq_en = nocache_base - 0xC ;
-#endif
-		return rc;
-	}
-	pr_err("%s: sec_log_save_size %d at sec_log_save_base 0x%x\n",
-	__func__, sec_log_save_size, (unsigned int)sec_log_save_base);
-	pr_err("%s: sec_log_reserve_size %d at sec_log_reserve_base 0x%x\n",
-	__func__, sec_log_reserve_size, (unsigned int)sec_log_reserve_base);
-
-	nocache_base = ioremap_nocache(sec_log_save_base - 4096,
-					sec_log_save_size + 8192);
-	nocache_base = nocache_base + 4096;
-
-	sec_log_mag = nocache_base - 8;
-	sec_log_ptr = nocache_base - 4;
-	sec_log_buf = nocache_base;
-#ifdef CONFIG_SEC_SSR_DUMP
-		ramdump_kernel_log_addr = sec_log_ptr;
-		pr_info("%s: ramdump_kernel_log_addr = 0x%x\n",
-		__func__, ramdump_kernel_log_addr);
-#endif
-	sec_log_size = sec_log_save_size;
-	sec_log_irq_en = nocache_base - 0xC ;
-
-	spin_lock_irqsave(&logbuf_lock, flags);
-	if (*sec_log_mag != LOG_MAGIC) {
-		*sec_log_ptr = 0;
-		*sec_log_mag = LOG_MAGIC;
-	}
-
-	start = min(con_start, log_start);
-	while (start != log_end) {
-		emit_sec_log_char(__log_buf
-				  [start++ & (__LOG_BUF_LEN - 1)]);
-	}
-
-	spin_unlock_irqrestore(&logbuf_lock, flags);
-	return rc;
-}
-#endif
-
-static int __init sec_log_setup(char *str)
-{
-	unsigned size = memparse(str, &str);
-
-/*
-	unsigned *sec_log_mag;
-	unsigned start;
-	unsigned long flags;
-*/
-
-	if (size && (size == roundup_pow_of_two(size)) && (*str == '@')) {
-		unsigned long long base = 0;
-		base = simple_strtoul(++str, &str, 0);
-
-#ifdef CONFIG_PRINTK_NOCACHE
-		sec_log_save_size = size;
-		sec_log_save_base = base;
-		sec_log_size = size;
-		sec_log_reserve_base = base - 8;
-		sec_log_reserve_size = size + 8;
-
-		return 1;
-#endif
-	}
-	return 1;
-}
-
-__setup("sec_log=", sec_log_setup);
-
-#else
-
-static inline void emit_sec_log_char(char c)
-{
-}
-
-#endif
-
 void __init setup_log_buf(int early)
 {
 	unsigned long flags;
@@ -386,7 +216,6 @@ void __init setup_log_buf(int early)
 			new_log_buf_len);
 		return;
 	}
-
 	spin_lock_irqsave(&logbuf_lock, flags);
 	log_buf_len = new_log_buf_len;
 	log_buf = new_log_buf;
@@ -883,6 +712,27 @@ static void call_console_drivers(unsigned start, unsigned end)
 	_call_console_drivers(start_print, end, msg_level);
 }
 
+#ifdef CONFIG_SEC_LOG
+static void (*log_char_hook)(char c);
+
+void register_log_char_hook(void (*f) (char c))
+{
+	unsigned start;
+	unsigned long flags;
+
+	spin_lock_irqsave(&logbuf_lock, flags);
+
+	start = min(con_start, log_start);
+	while (start != log_end)
+		f(__log_buf[start++ & (__LOG_BUF_LEN - 1)]);
+
+	log_char_hook = f;
+
+	spin_unlock_irqrestore(&logbuf_lock, flags);
+}
+EXPORT_SYMBOL(register_log_char_hook);
+#endif
+
 static void emit_log_char(char c)
 {
 	LOG_BUF(log_end) = c;
@@ -894,8 +744,9 @@ static void emit_log_char(char c)
 	if (logged_chars < log_buf_len)
 		logged_chars++;
 
-#ifdef CONFIG_SEC_DEBUG
-	emit_sec_log_char(c);
+#ifdef CONFIG_SEC_LOG
+	if (log_char_hook)
+		log_char_hook(c);
 #endif
 }
 
@@ -926,6 +777,21 @@ static int printk_time = 1;
 static int printk_time = 0;
 #endif
 module_param_named(time, printk_time, bool, S_IRUGO | S_IWUSR);
+
+#if defined(CONFIG_PRINTK_CPU_ID)
+static int printk_cpu_id = 1;
+#else
+static int printk_cpu_id = 0;
+#endif
+module_param_named(cpu, printk_cpu_id, bool, S_IRUGO | S_IWUSR);
+
+#if defined(CONFIG_PRINTK_PID)
+static int printk_pid = 1;
+#else
+static int printk_pid;
+#endif
+module_param_named(pid, printk_pid, bool, S_IRUGO | S_IWUSR);
+
 
 /* Check if we have any console registered that can be called early in boot. */
 static int have_callable_console(void)
@@ -965,11 +831,6 @@ asmlinkage int printk(const char *fmt, ...)
 {
 	va_list args;
 	int r;
-#ifdef CONFIG_MSM_RTB
-	void *caller = __builtin_return_address(0);
-
-	uncached_logk_pc(LOGK_LOGBUF, caller, (void *)log_end);
-#endif
 
 #ifdef CONFIG_KGDB_KDB
 	if (unlikely(kdb_trap_printk)) {
@@ -1105,6 +966,9 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	printed_len += vscnprintf(printk_buf + printed_len,
 				  sizeof(printk_buf) - printed_len, fmt, args);
 
+#ifdef	CONFIG_DEBUG_LL
+	printascii(printk_buf);
+#endif
 
 	p = printk_buf;
 
@@ -1151,32 +1015,41 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 			}
 
 			if (printk_time) {
-				/* Follow the token with the time */
-#ifdef LOCAL_CONFIG_PRINT_EXTRA_INFO
-				char tbuf[50+EXTRA_BUF_SIZE], *tp;
-#else
+				/* Add the current time stamp */
 				char tbuf[50], *tp;
-#endif
 				unsigned tlen;
 				unsigned long long t;
 				unsigned long nanosec_rem;
 
 				t = cpu_clock(printk_cpu);
 				nanosec_rem = do_div(t, 1000000000);
-#ifdef LOCAL_CONFIG_PRINT_EXTRA_INFO
-				if (console_loglevel >= 9)
-					tlen = sprintf(tbuf, "[%5lu.%06lu]%c"
-					"[%1d:%15s:%5d] ", (unsigned long) t,
-						nanosec_rem / 1000,
-						in_interrupt() ? 'I' : ' ',
-						smp_processor_id(),
-						current->comm,
-						task_pid_nr(current));
-				else
-#endif
 				tlen = sprintf(tbuf, "[%5lu.%06lu] ",
 						(unsigned long) t,
 						nanosec_rem / 1000);
+
+				for (tp = tbuf; tp < tbuf + tlen; tp++)
+					emit_log_char(*tp);
+				printed_len += tlen;
+			}
+
+			if (printk_cpu_id) {
+				/* Add the cpu id */
+				char tbuf[10], *tp;
+				unsigned tlen;
+
+				tlen = sprintf(tbuf, "c%u ", printk_cpu);
+
+				for (tp = tbuf; tp < tbuf + tlen; tp++)
+					emit_log_char(*tp);
+				printed_len += tlen;
+			}
+
+			if (printk_pid) {
+				/* Add the current process id */
+				char tbuf[10], *tp;
+				unsigned tlen;
+
+				tlen = sprintf(tbuf, "%6u ", current->pid);
 
 				for (tp = tbuf; tp < tbuf + tlen; tp++)
 					emit_log_char(*tp);
@@ -1378,13 +1251,11 @@ void resume_console(void)
 	console_unlock();
 }
 
-static void __cpuinit console_flush(struct work_struct *work)
+int get_console_suspended(void)
 {
-	console_lock();
-	console_unlock();
+	return console_suspended;
 }
-
-static __cpuinitdata DECLARE_WORK(console_cpu_notify_work, console_flush);
+EXPORT_SYMBOL(get_console_suspended);
 
 /**
  * console_cpu_notify - print deferred console messages after CPU hotplug
@@ -1396,9 +1267,6 @@ static __cpuinitdata DECLARE_WORK(console_cpu_notify_work, console_flush);
  * will be spooled but will not show up on the console.  This function is
  * called when a new CPU comes online (or fails to come up), and ensures
  * that any such output gets printed.
- *
- * Special handling must be done for cases invoked from an atomic context,
- * as we can't be taking the console semaphore here.
  */
 static int __cpuinit console_cpu_notify(struct notifier_block *self,
 	unsigned long action, void *hcpu)
@@ -1410,12 +1278,6 @@ static int __cpuinit console_cpu_notify(struct notifier_block *self,
 	case CPU_UP_CANCELED:
 		console_lock();
 		console_unlock();
-	/* invoked with preemption disabled, so defer */
-	case CPU_DYING:
-		if (!console_trylock())
-			schedule_work(&console_cpu_notify_work);
-		else
-			console_unlock();
 	}
 	return NOTIFY_OK;
 }
@@ -2000,7 +1862,12 @@ void kmsg_dump(enum kmsg_dump_reason reason)
 		dumper->dump(dumper, reason, s1, l1, s2, l2);
 	rcu_read_unlock();
 }
-#ifdef CONFIG_PRINTK_NOCACHE
-module_init(printk_remap_nocache);
 #endif
+
+#ifdef CONFIG_MACH_PX
+void logbuf_force_unlock(void)
+{
+	logbuf_lock = __SPIN_LOCK_UNLOCKED(logbuf_lock);
+}
+EXPORT_SYMBOL(logbuf_force_unlock);
 #endif

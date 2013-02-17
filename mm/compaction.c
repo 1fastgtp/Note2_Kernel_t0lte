@@ -656,6 +656,10 @@ unsigned long try_to_compact_pages(struct zonelist *zonelist,
 	if (!order || !may_enter_fs || !may_perform_io)
 		return rc;
 
+#if defined(CONFIG_MACH_Q1_BD) || defined(CONFIG_GC1_00_BD)
+	/* Temporary log to get information whether the compaction works well */
+	printk(KERN_NOTICE "%s, order=%d, sync=%d\n", __func__, order, sync);
+#endif
 	count_vm_event(COMPACTSTALL);
 
 	/* Compact each zone in the list */
@@ -714,14 +718,12 @@ static int compact_node(int nid)
 }
 
 /* Compact all nodes in the system */
-static int compact_nodes(void)
+static void compact_nodes(void)
 {
 	int nid;
 
 	for_each_online_node(nid)
 		compact_node(nid);
-
-	return COMPACT_COMPLETE;
 }
 
 /* The written value is actually unused, all memory is compacted */
@@ -732,7 +734,7 @@ int sysctl_compaction_handler(struct ctl_table *table, int write,
 			void __user *buffer, size_t *length, loff_t *ppos)
 {
 	if (write)
-		return compact_nodes();
+		compact_nodes();
 
 	return 0;
 }

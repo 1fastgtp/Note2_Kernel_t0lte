@@ -7,12 +7,6 @@
 
 use strict;
 
-use constant BEFORE_SHORTTEXT => 0;
-use constant IN_SHORTTEXT => 1;
-use constant AFTER_SHORTTEXT => 2;
-use constant CHECK_NEXT_SHORTTEXT => 3;
-use constant SHORTTEXT_LIMIT => 75;
-
 my $P = $0;
 $P =~ s@.*/@@g;
 
@@ -22,6 +16,7 @@ use Getopt::Long qw(:config no_auto_abbrev);
 
 my $quiet = 0;
 my $tree = 1;
+my $chk_subject = 1;
 my $chk_signoff = 1;
 my $chk_patch = 1;
 my $tst_only;
@@ -104,6 +99,7 @@ if (-f $conf) {
 GetOptions(
 	'q|quiet+'	=> \$quiet,
 	'tree!'		=> \$tree,
+	'subject!'	=> \$chk_subject,
 	'signoff!'	=> \$chk_signoff,
 	'patch!'	=> \$chk_patch,
 	'emacs!'	=> \$emacs,
@@ -246,19 +242,15 @@ our $NonptrType;
 our $Type;
 our $Declare;
 
-our $NON_ASCII_UTF8	= qr{
-	[\xC2-\xDF][\x80-\xBF]               # non-overlong 2-byte
+our $UTF8	= qr {
+	[\x09\x0A\x0D\x20-\x7E]              # ASCII
+	| [\xC2-\xDF][\x80-\xBF]             # non-overlong 2-byte
 	|  \xE0[\xA0-\xBF][\x80-\xBF]        # excluding overlongs
 	| [\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}  # straight 3-byte
 	|  \xED[\x80-\x9F][\x80-\xBF]        # excluding surrogates
 	|  \xF0[\x90-\xBF][\x80-\xBF]{2}     # planes 1-3
 	| [\xF1-\xF3][\x80-\xBF]{3}          # planes 4-15
 	|  \xF4[\x80-\x8F][\x80-\xBF]{2}     # plane 16
-}x;
-
-our $UTF8	= qr{
-	[\x09\x0A\x0D\x20-\x7E]              # ASCII
-	| $NON_ASCII_UTF8
 }x;
 
 our $typeTypedefs = qr{(?x:
@@ -350,6 +342,7 @@ sub deparenthesize {
 	return $string;
 }
 
+$chk_subject = 0 if ($file);
 $chk_signoff = 0 if ($file);
 
 my @dep_includes = ();
@@ -1322,33 +1315,6 @@ sub check_absolute_file {
 	}
 }
 
-sub cleanup_continuation_headers {
-	# Collapse any header-continuation lines into a single line so they
-	# can be parsed meaningfully, as the parser only has one line
-	# of context to work with.
-	my $again;
-	do {
-		$again = 0;
-		foreach my $n (0 .. scalar(@rawlines) - 2) {
-			if ($rawlines[$n]=~/^\s*$/) {
-				# A blank line means there's no more chance
-				# of finding headers.  Shortcut to done.
-				return;
-			}
-			if ($rawlines[$n]=~/^[\x21-\x39\x3b-\x7e]+:/ &&
-			    $rawlines[$n+1]=~/^\s+/) {
-				# Continuation header.  Collapse it.
-				my $line = splice @rawlines, $n+1, 1;
-				$line=~s/^\s+/ /;
-				$rawlines[$n] .= $line;
-				# We've 'destabilized' the list, so restart.
-				$again = 1;
-				last;
-			}
-		}
-	} while ($again);
-}
-
 sub process {
 	my $filename = shift;
 
@@ -1357,8 +1323,6 @@ sub process {
 	my $prevrawline="";
 	my $stashline="";
 	my $stashrawline="";
-	my $subjectline="";
-	my $sublinenr="";
 
 	my $length;
 	my $indent;
@@ -1368,9 +1332,6 @@ sub process {
 	our $clean = 1;
 	my $signoff = 0;
 	my $is_patch = 0;
-
-	my $in_header_lines = 1;
-	my $in_commit_log = 0;		#Scanning lines before patch
 
 	our @report = ();
 	our $cnt_lines = 0;
@@ -1401,15 +1362,8 @@ sub process {
 	my @setup_docs = ();
 	my $setup_docs = 0;
 
-	my $exec_file = "";
-
-	my $shorttext = BEFORE_SHORTTEXT;
-	my $shorttext_exspc = 0;
-
 	sanitise_line_reset();
-	cleanup_continuation_headers();
 	my $line;
-
 	foreach my $rawline (@rawlines) {
 		$linenr++;
 		$line = $rawline;
@@ -1546,7 +1500,6 @@ sub process {
 		if ($line =~ /^diff --git.*?(\S+)$/) {
 			$realfile = $1;
 			$realfile =~ s@^([^/]*)/@@;
-			$exec_file = $realfile;
 
 		} elsif ($line =~ /^\+\+\+\s+(\S+)/) {
 			$realfile = $1;
@@ -1563,81 +1516,14 @@ sub process {
 				ERROR("MODIFIED_INCLUDE_ASM",
 				      "do not modify files in include/asm, change architecture specific files in include/asm-<architecture>\n" . "$here$rawline\n");
 			}
-			$exec_file = "";
 			next;
 		}
-		elsif ($rawline =~ /^diff.+a\/(.+)\sb\/.+$/) {
-			$exec_file = $1;
-		}
-		#Check state to make sure we aren't in code block.
-		elsif  (($exec_file =~ /^.+\.[chS]$/ or
-			 $exec_file =~ /^.+\.txt$/ or
-			 $exec_file =~ /^.+\.ihex$/ or
-			 $exec_file =~ /^.+\.hex$/ or
-			 $exec_file =~ /^.+\.HEX$/ or
-			 $exec_file =~ /^.+defconfig$/ or
-			 $exec_file =~ /^Makefile$/ or
-			 $exec_file =~ /^Kconfig$/) &&
-			$rawline =~ /^new (file )?mode\s([0-9]+)$/ &&
-			(oct($2) & 0111))  {
-			    ERROR("Source file has +x permissions: " .
-			    "$exec_file\n");
-		}
+
 		$here .= "FILE: $realfile:$realline:" if ($realcnt != 0);
 
 		my $hereline = "$here\n$rawline\n";
 		my $herecurr = "$here\n$rawline\n";
 		my $hereprev = "$here\n$prevrawline\n$rawline\n";
-
-		if ($shorttext != AFTER_SHORTTEXT) {
-			if ($shorttext == IN_SHORTTEXT) {
-				if ($line=~/^---/ || $line=~/^diff.*/) {
-					$shorttext = AFTER_SHORTTEXT;
-				} elsif (length($line) > (SHORTTEXT_LIMIT +
-							  $shorttext_exspc)
-					 && $line !~ /^:([0-7]{6}\s){2}
-						      ([[:xdigit:]]+\.*
-						       \s){2}\w+\s\w+/xms) {
-					WARN("commit text line over " .
-					     SHORTTEXT_LIMIT .
-					     " characters\n" . $herecurr);
-				}
-			} elsif ($shorttext == CHECK_NEXT_SHORTTEXT) {
-# The Subject line doesn't have to be the last header in the patch.
-# Avoid moving to the IN_SHORTTEXT state until clear of all headers.
-# Per RFC5322, continuation lines must be folded, so any left-justified
-# text which looks like a header is definitely a header.
-				if ($line!~/^[\x21-\x39\x3b-\x7e]+:/) {
-					$shorttext = IN_SHORTTEXT;
-# Check for Subject line followed by a blank line.
-					if (length($line) != 0) {
-						WARN("non-blank line after " .
-						     "summary line\n" .
-						     $sublinenr . $here .
-						     "\n" . $subjectline .
-						     "\n" . $line . "\n");
-					}
-				}
-			} elsif ($line=~/^Subject: \[[^\]]*\] (.*)/) {
-				$shorttext = CHECK_NEXT_SHORTTEXT;
-				$subjectline = $line;
-				$sublinenr = "#$linenr & ";
-# Check for Subject line less than line limit
-				if (length($1) > SHORTTEXT_LIMIT) {
-					WARN("summary line over " .
-					     SHORTTEXT_LIMIT .
-					     " characters\n" . $herecurr);
-				}
-			} elsif ($line=~/^    (.*)/) {
-				$shorttext = IN_SHORTTEXT;
-				$shorttext_exspc = 4;
-				if (length($1) > SHORTTEXT_LIMIT) {
-					WARN("summary line over " .
-					     SHORTTEXT_LIMIT .
-					     " characters\n" . $herecurr);
-				}
-			}
-		}
 
 		$cnt_lines++ if ($realcnt != 0);
 
@@ -1650,10 +1536,29 @@ sub process {
 			}
 		}
 
+# Check for subject:
+		if ($chk_subject && $line =~ /^Subject: \[PATCH\] (\s*)(\[.*\])?/i) {
+		    my $space_before = $1;
+		    my $brace_usage = $2;
+		    if (defined $space_before && $space_before ne "") {
+			WARN("BAD_SUBJECT",
+			     "Remove leading whitespace on subject\n" . $herecurr);
+		    }
+		    if (defined $brace_usage && $brace_usage ne "") {
+			WARN("BAD_SUBJECT",
+			     "Avoid using '[xxx]' on subject. Use 'xxx:' instead\n" . $herecurr);
+		    }
+		    if ($lines[$linenr] !~ /^$/) {
+			ERROR("MISSING_BLANK_LINE_AFTER_SUBJECT",
+			      "Missing blank line after Subject: line\n" . $herecurr);
+		    }
+		}
+
+		#($line =~ /^Subject:/i) &&  ? 1 : 0;
+
 # Check the patch for a signoff:
 		if ($line =~ /^\s*signed-off-by:/i) {
 			$signoff++;
-			$in_commit_log = 0;
 		}
 
 # Check signature styles
@@ -1695,14 +1600,6 @@ sub process {
 					     "email address '$email' might be better as '$suggested_email$comment'\n" . $herecurr);
 				}
 			}
-			if ($line =~ /^\s*signed-off-by:.*(quicinc|qualcomm)\.com/i) {
-				WARN("invalid Signed-off-by identity\n" . $line );
-			}
-		}
-
-#check the patch for invalid author credentials
-		if ($line =~ /^From:.*(quicinc|qualcomm)\.com/) {
-			WARN("invalid author identity\n" . $line );
 		}
 
 # Check for wrappage within a valid hunk of the file
@@ -1737,21 +1634,6 @@ sub process {
 
 			CHK("INVALID_UTF8",
 			    "Invalid UTF-8, patch and commit message should be encoded in UTF-8\n" . $hereptr);
-		}
-
-# Check if it's the start of a commit log
-# (not a header line and we haven't seen the patch filename)
-		if ($in_header_lines && $realfile =~ /^$/ &&
-		    $rawline !~ /^(commit\b|from\b|\w+:).+$/i) {
-			$in_header_lines = 0;
-			$in_commit_log = 1;
-		}
-
-# Still not yet in a patch, check for any UTF-8
-		if ($in_commit_log && $realfile =~ /^$/ &&
-		    $rawline =~ /$NON_ASCII_UTF8/) {
-			CHK("UTF8_BEFORE_PATCH",
-			    "8-bit UTF-8 used in possible commit log\n" . $herecurr);
 		}
 
 # ignore non-hunk lines and lines being removed
@@ -1802,20 +1684,6 @@ sub process {
 			#print "is_end<$is_end> length<$length>\n";
 		}
 
-		if (($realfile =~ /Makefile.*/ || $realfile =~ /Kbuild.*/) &&
-		    ($line =~ /\+(EXTRA_[A-Z]+FLAGS).*/)) {
-			my $flag = $1;
-			my $replacement = {
-				'EXTRA_AFLAGS' =>   'asflags-y',
-				'EXTRA_CFLAGS' =>   'ccflags-y',
-				'EXTRA_CPPFLAGS' => 'cppflags-y',
-				'EXTRA_LDFLAGS' =>  'ldflags-y',
-			};
-
-			WARN("DEPRECATED_VARIABLE",
-			     "Use of $flag is deprecated, please use \`$replacement->{$flag} instead.\n" . $herecurr) if ($replacement->{$flag});
-		}
-
 # check we are in a valid source file if not then ignore this hunk
 		next if ($realfile !~ /\.(h|c|s|S|pl|sh)$/);
 
@@ -1824,7 +1692,6 @@ sub process {
 		    $rawline !~ /^.\s*\*\s*\@$Ident\s/ &&
 		    !($line =~ /^\+\s*$logFunctions\s*\(\s*(?:(KERN_\S+\s*|[^"]*))?"[X\t]*"\s*(?:|,|\)\s*;)\s*$/ ||
 		    $line =~ /^\+\s*"[^"]*"\s*(?:\s*|,|\)\s*;)\s*$/) &&
-		    $realfile ne "scripts/checkpatch.pl" &&
 		    $length > 80)
 		{
 			WARN("LONG_LINE",
@@ -2662,7 +2529,7 @@ sub process {
 
 # check spacing on parentheses
 		if ($line =~ /\(\s/ && $line !~ /\(\s*(?:\\)?$/ &&
-		    $line !~ /for\s*\(\s+;/ && $line !~ /^\+\s*[A-Z_][A-Z\d_]*\(\s*\d+(\,.*)?\)\,?$/) {
+		    $line !~ /for\s*\(\s+;/) {
 			ERROR("SPACING",
 			      "space prohibited after that open parenthesis '('\n" . $herecurr);
 		}
@@ -2895,7 +2762,7 @@ sub process {
 		if ($realfile !~ m@/vmlinux.lds.h$@ &&
 		    $line =~ /^.\s*\#\s*define\s*$Ident(\()?/) {
 			my $ln = $linenr;
-			my $cnt = $realcnt - 1;
+			my $cnt = $realcnt;
 			my ($off, $dstat, $dcond, $rest);
 			my $ctx = '';
 
@@ -2951,19 +2818,12 @@ sub process {
 			{
 			}
 
-			# Extremely long macros may fall off the end of the
-			# available context without closing.  Give a dangling
-			# backslash the benefit of the doubt and allow it
-			# to gobble any hanging open-parens.
-			$dstat =~ s/\(.+\\$/1/;
-
 			my $exceptions = qr{
 				$Declare|
 				module_param_named|
 				MODULE_PARAM_DESC|
 				DECLARE_PER_CPU|
 				DEFINE_PER_CPU|
-				CLK_[A-Z\d_]+|
 				__typeof__\(|
 				union|
 				struct|
@@ -3130,85 +2990,11 @@ sub process {
 			     "Use of volatile is usually wrong: see Documentation/volatile-considered-harmful.txt\n" . $herecurr);
 		}
 
-# sys_open/read/write/close are not allowed in the kernel
-		if ($line =~ /\b(sys_(?:open|read|write|close))\b/) {
-			ERROR("$1 is inappropriate in kernel code.\n" .
-			      $herecurr);
-		}
-
-# filp_open is a backdoor for sys_open
-		if ($line =~ /\b(filp_open)\b/) {
-			ERROR("$1 is inappropriate in kernel code.\n" .
-			      $herecurr);
-		}
-
-# read[bwl] & write[bwl] use too many barriers, use the _relaxed variants
-		if ($line =~ /\b((?:read|write)[bwl])\b/) {
-			ERROR("Use of $1 is deprecated: use $1_relaxed\n\t" .
-			      "with appropriate memory barriers instead.\n" .
-			      $herecurr);
-		}
-
-# likewise, in/out[bwl] should be __raw_read/write[bwl]...
-		if ($line =~ /\b((in|out)([bwl]))\b/) {
-			my ($all, $pref, $suf) = ($1, $2, $3);
-			$pref =~ s/in/read/;
-			$pref =~ s/out/write/;
-			ERROR("Use of $all is deprecated: use " .
-			      "__raw_$pref$suf\n\t" .
-			      "with appropriate memory barriers instead.\n" .
-			      $herecurr);
-		}
-
-# dsb is too ARMish, and should usually be mb.
-		if ($line =~ /\bdsb\b/) {
-			WARN("Use of dsb is discouranged: prefer mb.\n" .
-			     $herecurr);
-		}
-
-# MSM - check if a non board-gpiomux file has any gpiomux declarations
-	if ($realfile =~ /\/mach-msm\/board-[0-9]+/ &&
-	    $realfile !~ /camera/ && $realfile !~ /gpiomux/ &&
-	    $line =~ /\s*struct msm_gpiomux_config\s*/ ) {
-		WARN("Non gpiomux board file cannot have a gpiomux config declarations. Please declare gpiomux configs in board-*-gpiomux.c file.\n" . $herecurr);
-	}
-
-# MSM - check if vreg_xxx function are used
-	if ($line =~ /\b(vreg_(get|put|set_level|enable|disable))\b/) {
-		WARN("Use of $1 API is deprecated: " .
-			"use regulator APIs\n" . $herecurr);
-	}
-
-# unbounded string functions are overflow risks
-		my %str_fns = (
-			"sprintf" => "snprintf",
-			"strcpy"  => "strncpy",
-			"strcat"  => "strncat",
-			"strcmp"  => "strncmp",
-			"strcasecmp" => "strncasecmp",
-			"strchr" => "strnchr",
-			"strstr" => "strnstr",
-			"strlen" => "strnlen",
-		);
-		foreach my $k (keys %str_fns) {
-			if ($line =~ /\b$k\b/) {
-				ERROR("Use of $k is deprecated: " .
-				      "use $str_fns{$k} instead.\n" .
-				      $herecurr);
-			}
-		}
-
 # warn about #if 0
 		if ($line =~ /^.\s*\#\s*if\s+0\b/) {
-			WARN("REDUNDANT_CODE",
-			     "if this code is redundant consider removing it\n"
-				.  $herecurr);
-		}
-# warn about #if 1
-		if ($line =~ /^.\s*\#\s*if\s+1\b/) {
-			WARN("REDUNDANT_CODE",
-			     "if this code is required consider removing"
-				. " #if 1\n" .  $herecurr);
+			CHK("REDUNDANT_CODE",
+			    "if this code is redundant consider removing it\n" .
+				$herecurr);
 		}
 
 # check for needless kfree() checks
@@ -3243,11 +3029,6 @@ sub process {
 				WARN("MSLEEP",
 				     "msleep < 20ms can sleep for up to 20ms; see Documentation/timers/timers-howto.txt\n" . $line);
 			}
-		}
-
-# check the patch for use of mdelay
-		if ($line =~ /\bmdelay\s*\(/) {
-			WARN("use of mdelay() found: msleep() is the preferred API.\n" . $line );
 		}
 
 # warn about #ifdefs in C files
@@ -3381,11 +3162,6 @@ sub process {
 			 "Statements terminations use 1 semicolon\n" . $herecurr);
 		}
 
-# check for return codes on error paths
-		if ($line =~ /\breturn\s+-\d+/) {
-			ERROR("illegal return value, please use an error code\n" . $herecurr);
-		}
-
 # check for gcc specific __FUNCTION__
 		if ($line =~ /__FUNCTION__/) {
 			WARN("USE_FUNC",
@@ -3398,10 +3174,10 @@ sub process {
 			     "consider using a completion\n" . $herecurr);
 
 		}
-# recommend kstrto* over simple_strto* and strict_strto*
-		if ($line =~ /\b((simple|strict)_(strto(l|ll|ul|ull)))\s*\(/) {
+# recommend kstrto* over simple_strto*
+		if ($line =~ /\bsimple_(strto.*?)\s*\(/) {
 			WARN("CONSIDER_KSTRTO",
-			     "$1 is obsolete, use k$3 instead\n" . $herecurr);
+			     "consider using kstrto* in preference to simple_$1\n" . $herecurr);
 		}
 # check for __initcall(), use device_initcall() explicitly please
 		if ($line =~ /^.\s*__initcall\s*\(/) {
