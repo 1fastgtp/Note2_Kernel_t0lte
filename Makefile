@@ -1,7 +1,9 @@
 VERSION = 3
 PATCHLEVEL = 0
-SUBLEVEL = 61
+SUBLEVEL = 65
 EXTRAVERSION =-Xone_Kernel
+NAME = Sneaky Weasel
+
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
