@@ -766,6 +766,13 @@ static struct cpuidle_state exynos4_cpuidle_set[] = {
 		.enter			= exynos4_enter_lowpower,
 		.exit_latency		= 300,
 		.target_residency	= 1000,
+		
+#ifdef CONFIG_MACH_T0
+		.target_residency	= 7500,
+#else
+		.target_residency	= 1000,
+#endif
+
 		.flags			= CPUIDLE_FLAG_TIME_VALID,
 		.name			= "LOW_POWER",
 		.desc			= "ARM power down",
